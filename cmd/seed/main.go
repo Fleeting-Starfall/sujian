@@ -99,8 +99,8 @@ func main() {
 	n7 := note(st, dave, "深夜恐怖片单：胆小勿点",
 		"整理了一波适合深夜看的恐怖片，口味偏重：\n\n- 招魂系列：jump scare 教科书\n- 遗传厄运：心理恐怖代表作\n- 咒怨：看完不敢关灯\n\n未成年人请在家长陪同下观看。",
 		"影视", []string{"恐怖片", "片单"}, []string{m7})
-	_ = st.ReviewNote(n5.ID, "published", "yellow") // 黄标：自由浏览，不进首页
-	_ = st.ReviewNote(n7.ID, "published", "red")    // 红标：敏感内容（登录用户可见，前端模糊+确认）
+	_ = st.ReviewNote(n5.ID, "published", "yellow") // 黄标：不进首页
+	_ = st.ReviewNote(n7.ID, "published", "red")    // 红标：敏感内容，需登录确认
 
 	// ---- 初始浏览量（模拟数据热度）----
 	for _, nn := range []*model.Note{n1, n2, n3, n4, n5, n6, n7} {

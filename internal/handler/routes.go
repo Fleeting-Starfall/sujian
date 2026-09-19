@@ -98,6 +98,6 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /messages", s.Page("messages.html", "auth"))
 	mux.HandleFunc("GET /admin", s.Page("admin/index.html", "admin"))
 	mux.HandleFunc("GET /admin/", s.Page("admin/index.html", "admin"))
-	// 根路径作为兜底（更具体的 /css/、/uploads/、/api/* 模式优先匹配）
+	// 根路径兜底，具体模式优先匹配
 	mux.HandleFunc("/", s.Page("index.html", "auth"))
 }

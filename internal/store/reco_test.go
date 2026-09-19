@@ -8,8 +8,7 @@ import (
 	"sujian/internal/model"
 )
 
-// TestColdStartInterests 验证：注册时选的兴趣标签，在无任何真实互动时
-// 仍作为弱画像进入 interestTags，从而让该标签内容出现在推荐中。
+// TestColdStartInterests 注册兴趣标签作为弱画像进入推荐。
 func TestColdStartInterests(t *testing.T) {
 	dir := t.TempDir()
 	s := New(dir)
@@ -23,7 +22,7 @@ func TestColdStartInterests(t *testing.T) {
 	if err := s.SetUserStatus(u.ID, "active"); err != nil {
 		t.Fatal(err)
 	}
-	// 给 alice 发布两篇不同标签的笔记（由 admin 发，避免作者自身标签污染画像）
+	// 由 admin 发布，避免作者标签污染画像
 	var admin *model.User
 	for _, uu := range s.Users {
 		if uu.Role == "admin" {
@@ -37,7 +36,7 @@ func TestColdStartInterests(t *testing.T) {
 	s.AddNote(admin, "摄1", "c", "image", nil, "", []string{"摄影"}, "推荐", "published", "green")
 	s.AddNote(admin, "编1", "c", "image", nil, "", []string{"编程"}, "推荐", "published", "green")
 
-	// 画像应含「摄影」且权重为弱画像 0.5（无真实互动）
+	// 画像含「摄影」且权重 0.5
 	prof := s.interestTags(u.ID)
 	if prof["摄影"] != 0.5 {
 		t.Fatalf("冷启动弱画像未生效：prof[摄影]=%v（期望 0.5）", prof["摄影"])
@@ -58,7 +57,7 @@ func TestColdStartInterests(t *testing.T) {
 	t.Logf("✓ 冷启动弱画像生效：prof[摄影]=0.5，摄影笔记进入推荐")
 }
 
-// TestRecoConfigLoad 验证 reco_config.json 的读取与默认值兜底。
+// TestRecoConfigLoad reco_config.json 读取与默认值兜底。
 func TestRecoConfigLoad(t *testing.T) {
 	// 1) 无配置文件时用默认值
 	dir1 := t.TempDir()

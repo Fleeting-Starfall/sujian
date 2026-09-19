@@ -11,7 +11,7 @@ import (
 	"sujian/internal/model"
 )
 
-// 用户名允许的字符：字母 / 数字 / 下划线 / 中文（2-20 位）。避免空格、符号等造成展示混乱。
+// 用户名：字母/数字/下划线/中文，2-20 位。
 var usernameRe = regexp.MustCompile(`^[A-Za-z0-9_\p{Han}]+$`)
 
 func (s *Server) register(w http.ResponseWriter, r *http.Request) {
@@ -78,7 +78,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	token := s.Store.CreateSession(u.ID)
 	// 记录登录 IP
 	s.Store.RecordLogin(u.ID, s.clientIP(r))
-	// 会话持久化：30 天有效，期间无需重新登录（关闭浏览器也保持）
+	// 会话 30 天有效
 	http.SetCookie(w, &http.Cookie{
 		Name: "session", Value: token, Path: "/",
 		HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: 30 * 24 * 3600,
@@ -86,7 +86,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, 200, map[string]interface{}{"token": token, "user": model.ToPublic(u)})
 }
 
-// clientIP 取客户端真实 IP（优先反向代理头，兼容局域网直连）
+// clientIP 取客户端真实 IP
 func (s *Server) clientIP(r *http.Request) string {
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		ip := strings.Split(xff, ",")[0]
@@ -118,12 +118,12 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 		s.writeJSON(w, 401, map[string]string{"error": "未登录"})
 		return
 	}
-	// 本人查看自己：附带明文密码副本（个人中心展示）
+	// 本人查看自己：附带明文密码副本
 	s.writeJSON(w, 200, userJSON(u, true))
 }
 
-// changePassword 用户自助修改密码（登录状态下）。
-// 需要验证旧密码；成功后踢掉该用户全部会话（含当前），强制重新登录。
+// changePassword 改密
+// 验旧密码；成功后踢掉全部会话
 func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) {
 	u := s.requireActive(w, r)
 	if u == nil {
@@ -153,12 +153,12 @@ func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) {
 		s.writeJSON(w, 400, map[string]string{"error": err.Error()})
 		return
 	}
-	// 安全：改密后使该用户所有会话失效（含当前），防止旧 token 继续有效
+	// 改密后使所有旧会话失效
 	s.Store.DeleteUserSessions(u.ID)
 	s.writeJSON(w, 200, map[string]string{"message": "密码已修改，请重新登录"})
 }
 
-// requestAgeVerify 用户主动提交成年认证申请（待管理员审核）
+// requestAgeVerify 提交年龄认证申请
 func (s *Server) requestAgeVerify(w http.ResponseWriter, r *http.Request) {
 	u := s.currentUser(r)
 	if u == nil {
@@ -172,7 +172,7 @@ func (s *Server) requestAgeVerify(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, 200, map[string]interface{}{"message": "成年认证申请已提交，请等待管理员审核"})
 }
 
-// requestOfficialVerify 用户提交官方认证申请（材料说明 + 附件）
+// requestOfficialVerify 提交官方认证申请
 func (s *Server) requestOfficialVerify(w http.ResponseWriter, r *http.Request) {
 	u := s.currentUser(r)
 	if u == nil {

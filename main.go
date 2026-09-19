@@ -20,7 +20,7 @@ import (
 func main() {
 	// 端口优先级：命令行 --port > 环境变量 PORT > 默认 8099
 	port := 8099
-	host := "" // 空 = 监听所有网卡 (0.0.0.0)；指定则只绑该地址（如 127.0.0.1 仅本机可访问）
+	host := "" // 空 = 监听所有网卡
 	if p := os.Getenv("PORT"); p != "" {
 		if v, err := strconv.Atoi(p); err == nil && v > 0 {
 			port = v
@@ -55,7 +55,7 @@ func main() {
 	mux.Handle("/js/", http.StripPrefix("/js/", http.FileServer(http.Dir(filepath.Join(cfg.PublicDir, "js")))))
 	// 用户上传目录：禁止目录列表（直接访问 /uploads/ 或 /uploads/<dir>/ 返回 404，只允许访问具体文件）
 	// 安全：非多媒体扩展名（如 .html/.js/.zip/.exe）强制 Content-Disposition: attachment（下载而非浏览器渲染），
-	// 防止通过私信/上传传进来的危险文件在别人的浏览器里直接执行。
+	// 防危险文件在浏览器直接执行。
 	mux.Handle("/uploads/", http.StripPrefix("/uploads/", noDirListing(safeUploads(http.FileServer(http.Dir(cfg.UploadDir))))))
 
 	srv.RegisterRoutes(mux)
@@ -94,7 +94,7 @@ func main() {
 
 // baseDir 解析项目根目录：默认用「二进制所在目录」，调试/单测时兜底到当前工作目录。
 // 用 os.Executable() 拿到二进制绝对路径后取父目录；go run 会把临时编译产物放到 $TMPDIR/go-build*/exe/，
-// 此时退回到 os.Getwd()（用户是在项目根运行 go run），保证开发体验。
+// 退回 os.Getwd()（go run 时在项目根）。
 func baseDir() string {
 	if exe, err := os.Executable(); err == nil {
 		// 解析符号链接，得到真实路径（macOS 上 sujian-server 通常是普通文件）

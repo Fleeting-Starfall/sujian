@@ -1,15 +1,8 @@
 #!/bin/bash
-# 素见 一键启动/停止脚本
+# 素见 启动/停止脚本
 # 用法：
-#   ./start.sh              # 启动（自动编译 + 后台常驻）
-#   ./start.sh start        # 同上
-#   ./start.sh stop         # 停止
-#   ./start.sh restart      # 重启
-#   ./start.sh status       # 查看运行状态
-#   ./start.sh killport     # 强制释放被占用的端口（若有其他进程卡在 8099）
-#   ./start.sh --port 9000  # 改端口启动
-#   ./start.sh --port 9000 restart  # 重启到指定端口
-# 端口优先级：--port 命令行参数 > PORT 环境变量 > 默认 8099
+#   ./start.sh killport     # 强制释放被占端口
+# 端口优先级：--port > PORT 环境变量 > 默认 8099
 set -u
 cd "$(dirname "$0")"
 

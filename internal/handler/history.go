@@ -4,8 +4,8 @@ import (
 	"net/http"
 )
 
-// myHistory 我的浏览历史：按最近浏览倒序返回笔记列表。
-// 已删除/下架的笔记自动不展示；红标按等级可见性过滤。
+// myHistory 浏览历史（倒序）
+// 已删除/下架不展示；红标按等级过滤。
 func (s *Server) myHistory(w http.ResponseWriter, r *http.Request) {
 	u := s.requireLogin(w, r)
 	if u == nil {

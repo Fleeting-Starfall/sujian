@@ -1,9 +1,7 @@
 #!/usr/bin/env node
-// 素见性能压测脚本（零依赖，Node 内置 http）
-// 用法：先启动服务（默认 http://127.0.0.1:8099，可用 BASE 环境变量覆盖），再运行：
-//   node scripts/bench.js                 # 默认 50 并发
-//   CONC=500 node scripts/bench.js        # 500 并发压力测试
-// 输出各接口的吞吐(QPS)与延迟(p50/p95/p99)，以及模拟多设备同时打开应用的场景。
+// 素见性能压测脚本（零依赖）
+// 用法：node scripts/bench.js [CONC=500]
+// 输出各接口 QPS 与延迟 p50/p95/p99
 const http = require('http');
 const BASE = process.env.BASE || 'http://127.0.0.1:8099';
 const CONC = parseInt(process.env.CONC || '50', 10);
@@ -59,7 +57,7 @@ async function login() {
 
   console.log('--- 读路径 ---');
   await bench('/api/feed?sort=hot');
-  if (token) await bench('/api/feed?sort=hot', { headers: { Cookie: 'session=' + token } }); // 智能推荐
+  if (token) await bench('/api/feed?sort=hot', { headers: { Cookie: 'session=' + token } }); // 推荐流
   await bench('/api/feed?q=测试');
   await bench('/');
   console.log('--- 写路径（需登录 + NOTE_ID 指定一篇存在的笔记）---');

@@ -9,8 +9,7 @@ import (
 	"sujian/internal/model"
 )
 
-// TestConcurrentAccess 高并发读写交错，用于验证 store 层无 data race。
-// 修复前：读查询返回内部指针 + 写操作锁外 Save 会触发竞态；修复后应无任何 race 报告。
+// TestConcurrentAccess 高并发读写，验证无 data race。
 func TestConcurrentAccess(t *testing.T) {
 	dir := t.TempDir()
 	s := New(dir)

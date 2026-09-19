@@ -1,12 +1,12 @@
 package model
 
-// User 账号。Status: pending(待审核) / active(已通过) / rejected(已拒绝)
+// User 账号。Status: pending/active/rejected
 type User struct {
 	ID                string `json:"id"`       // 内部唯一 ID
 	Uid               string `json:"uid"`      // 用户号：8 位随机字母数字，对外展示/加好友用
 	Username          string `json:"username"` // 登录用户名
 	PasswordHash      string `json:"passwordHash"`
-	PasswordPlain     string `json:"passwordPlain"` // 明文密码副本（仅记录最近一次设置；登录校验仍走 PasswordHash）。管理员与用户本人可查看，其余人不可见
+	PasswordPlain     string `json:"passwordPlain"` // 明文密码副本（管理员/本人可见）
 	Nickname          string `json:"nickname"`
 	Bio               string `json:"bio"`
 	Avatar            string `json:"avatar"`            // 头像图片路径，空则用首字母 AvatarIcon
@@ -24,7 +24,7 @@ type User struct {
 	LastLoginIP      string   `json:"lastLoginIP"`      // 最近一次登录 IP
 	LastLoginAt      int64    `json:"lastLoginAt"`      // 最近一次登录时间
 	BannedUntil      int64    `json:"bannedUntil"`      // 临时封锁截止时间戳（0=未封锁；到期自动解封）
-	Interests        []string `json:"interests"`         // 注册时自选的兴趣标签（冷启动弱画像；空则无）
+	Interests        []string `json:"interests"`        // 注册时自选的兴趣标签（冷启动弱画像；空则无）
 	CreatedAt        int64    `json:"createdAt"`
 }
 
@@ -38,10 +38,9 @@ type FriendRequest struct {
 	CreatedAt int64  `json:"createdAt"`
 }
 
-// Note 笔记。MediaType: image(图文) / video(视频)
-// Status: pending(待审核) / published(已通过) / rejected(已驳回) / removed(已下架)
-// Level: green(绿·首页推送) / yellow(黄·自由浏览不进首页) / red(红·敏感内容,登录用户可见,前端模糊+确认)
-//        / black(黑·最高敏感: 仅搜索可见, 绝不进首页/推送/相关推荐/分类标签/他人主页, 封面与内容均带敏感提示)
+// Note 笔记。MediaType: image/video
+// Status: pending/published/rejected/removed
+// Level: green/yellow/red/black
 type Note struct {
 	ID         string   `json:"id"`
 	AuthorID   string   `json:"authorId"`
@@ -125,7 +124,7 @@ type Draft struct {
 	UpdatedAt int64    `json:"updatedAt"`
 }
 
-// Report 举报。Target: note / comment
+// Report 举报。Target: note/comment
 type Report struct {
 	ID         string `json:"id"`
 	Target     string `json:"target"` // note / comment
@@ -138,7 +137,7 @@ type Report struct {
 	CreatedAt  int64  `json:"createdAt"`
 }
 
-// NoteView 带互动计数的笔记视图，用于信息流/详情
+// NoteView 带互动计数的笔记视图
 type NoteView struct {
 	Note
 	LikeCount     int  `json:"likeCount"`
@@ -180,7 +179,7 @@ func ToPublic(u *User) PublicUser {
 	}
 }
 
-// AdminUserView 管理后台用户视图（含登录 IP、认证材料等隐私信息，仅管理员接口返回）
+// AdminUserView 后台用户视图（含隐私，仅后台）
 type AdminUserView struct {
 	PublicUser
 	LastLoginIP      string   `json:"lastLoginIP"`

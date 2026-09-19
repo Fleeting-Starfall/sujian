@@ -41,7 +41,7 @@ func (s *Server) feed(w http.ResponseWriter, r *http.Request) {
 	if sortParam != "hot" {
 		sortParam = "new"
 	}
-	// 首页「推荐」频道（综合排序、已登录）走个性化智能推荐；其余（分类/关注/最新/搜索）保持原逻辑
+	// 首页「推荐」频道：已登录走推荐流；其余保持原逻辑
 	var notes []*model.Note
 	if tab == "" && category == "" && keyword == "" && sortParam == "hot" && viewer != nil {
 		notes = s.Store.RecommendForUser(viewer.ID, 200)
@@ -77,7 +77,7 @@ func (s *Server) feed(w http.ResponseWriter, r *http.Request) {
 	for _, n := range notes[start:end] {
 		// 首页瀑布流仅做展示，不累计浏览量、不记浏览历史。
 		// 浏览量与「我的历史」只在用户真正打开笔记详情（noteDetail）时记录，
-		// 避免「划过卡片」被算作一次浏览——曝光不等于浏览。
+		// 曝光不等于浏览，划过不算。
 		views = append(views, s.Store.View(n, viewerID))
 	}
 	s.writeJSON(w, 200, map[string]interface{}{
@@ -134,14 +134,14 @@ func (s *Server) noteDetail(w http.ResponseWriter, r *http.Request) {
 	if viewer == nil || viewer.ID != n.AuthorID {
 		s.Store.IncViews(id, 1) // 浏览数 +1（作者本人查看不计入）
 		if viewer != nil {
-			s.Store.RecordView(viewer.ID, id) // 登录用户浏览 → 记入「我的历史」
+			s.Store.RecordView(viewer.ID, id) // 记入「我的历史」
 		}
-		n = s.Store.NoteRaw(id) // 重新取最新快照：让本次响应立即返回 +1 后的浏览量
+		n = s.Store.NoteRaw(id) // 取最新快照，返回 +1 后的浏览量
 	}
 	view := s.Store.View(n, viewerID)
 	order := r.URL.Query().Get("order") // 评论排序：hot(按回复数) / new(最新)
 	comments := s.Store.CommentsByNote(id, order)
-	s.Store.FillCommentViews(comments, viewerID) // 评论"我赞过"状态
+	s.Store.FillCommentViews(comments, viewerID) // 评论「我赞过」
 	following := viewer != nil && s.Store.IsFollowing(viewer.ID, n.AuthorID)
 	related := make([]model.NoteView, 0, 4)
 	for _, rn := range s.Store.RelatedNotes(n.ID, n.Category, 4) {
@@ -149,8 +149,8 @@ func (s *Server) noteDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	s.writeJSON(w, 200, map[string]interface{}{
 		"note": view, "comments": comments, "following": following, "related": related,
-		"sensitive":     s.noteLevel(n) == "red" || s.noteLevel(n) == "black", // 红/黑标：前端需模糊封面+确认后才能查看
-		"sensitiveLevel": s.noteLevel(n), // green/yellow/red/black；前端据此决定提示强度与文案
+		"sensitive":      s.noteLevel(n) == "red" || s.noteLevel(n) == "black", // 红/黑标：前端模糊+确认
+		"sensitiveLevel": s.noteLevel(n),                                       // 等级；前端据此决定提示强度
 	})
 }
 
@@ -231,7 +231,7 @@ func (s *Server) commentLike(w http.ResponseWriter, r *http.Request) {
 }
 
 // cleanTags 清理标签：去首尾空格、去重、单标签最长 20 字、最多 10 个。
-// 统一用于发布笔记 / 编辑笔记 / 保存草稿，保证标签数据一致。
+// 发布/编辑/草稿共用，标签数据一致。
 func cleanTags(tags []string) []string {
 	seen := map[string]bool{}
 	out := []string{}
@@ -368,7 +368,7 @@ func (s *Server) like(w http.ResponseWriter, r *http.Request) {
 	if on {
 		s.notify(n.AuthorID, u, "like", n.ID, n.Title, "")
 	}
-	// 返回服务端权威计数，前端直接用（避免多端操作时本地 ±1 猜测导致显示漂移）
+	// 返回服务端权威计数，前端直接用。
 	s.writeJSON(w, 200, map[string]interface{}{"liked": on, "likeCount": s.Store.LikeCount(n.ID)})
 }
 
@@ -445,7 +445,7 @@ func (s *Server) userInfo(w http.ResponseWriter, r *http.Request) {
 	me := s.currentUser(r)
 	following := false
 	relation := "none"
-	includePlain := false // 明文密码副本：仅本人查看自己 / 管理员查看 时可见
+	includePlain := false // 明文密码副本：仅本人/管理员可见
 	if me != nil {
 		if me.ID != u.ID {
 			following = s.Store.IsFollowing(me.ID, u.ID)
@@ -516,7 +516,7 @@ func (s *Server) myFavorites(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if !s.canViewLevel(n, u) {
-			continue // 红/黑标：未登录不可见（此处已登录，理论不会走到，防御性保留）
+			continue // 防御：未登录不可见
 		}
 		views = append(views, s.Store.View(n, u.ID))
 	}
@@ -535,7 +535,7 @@ func (s *Server) userNotes(w http.ResponseWriter, r *http.Request) {
 	out := []model.NoteView{}
 	for _, n := range notes {
 		if !s.noteVisible(n, viewer, false) {
-			continue // 黑标不对外展示（仅作者本人/管理员/搜索可见）
+			continue // 黑标不对外展示
 		}
 		out = append(out, s.Store.View(n, viewerID))
 	}
@@ -685,7 +685,7 @@ func (s *Server) tagNotes(w http.ResponseWriter, r *http.Request) {
 	views := make([]model.NoteView, 0, len(notes))
 	for _, n := range notes {
 		if !s.noteVisible(n, viewer, false) {
-			continue // 黑标不对外展示（仅作者本人/管理员/搜索可见）
+			continue // 黑标不对外展示
 		}
 		views = append(views, s.Store.View(n, viewerID))
 	}

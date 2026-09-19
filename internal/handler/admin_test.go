@@ -4,9 +4,7 @@ import (
 	"testing"
 )
 
-// TestAdminResetPasswordInvalidatesSessions 验证安全增强：
-// 管理员重置密码后，该用户所有旧会话立即失效（旧 token 无法继续访问），
-// 新密码可正常登录、旧密码被拒。
+// TestAdminResetPasswordInvalidatesSessions 重置密码后旧会话失效，旧密码被拒。
 func TestAdminResetPasswordInvalidatesSessions(t *testing.T) {
 	app, cleanup := newTestApp(t)
 	defer cleanup()
@@ -34,7 +32,7 @@ func TestAdminResetPasswordInvalidatesSessions(t *testing.T) {
 		t.Fatalf("重置前 tester 旧 token 应可访问 /api/me，实际 %d", me.Status)
 	}
 
-	// 3) 管理员一键重置为 000000
+	// 3) 管理员重置为 000000
 	reset := app.do("POST", "/api/admin/users/"+uid+"/reset-password", adminTok, map[string]string{"newPassword": "000000"})
 	if reset.Status != 200 {
 		t.Fatalf("重置密码失败 %d: %v", reset.Status, reset.Body)
@@ -56,8 +54,7 @@ func TestAdminResetPasswordInvalidatesSessions(t *testing.T) {
 	}
 }
 
-// TestAdminBanUser 验证定时封锁：
-// 封锁后旧会话立即失效、登录被拒（提示封锁时间）；到期(或手动解封)后自动恢复。
+// TestAdminBanUser 定时封锁：封锁即失效，到期自动恢复。
 func TestAdminBanUser(t *testing.T) {
 	app, cleanup := newTestApp(t)
 	defer cleanup()
@@ -107,15 +104,14 @@ func TestAdminBanUser(t *testing.T) {
 	}
 }
 
-// adminID 从 /api/me 取当前用户 ID（避免在测试里硬编码）
+// adminID 从 /api/me 取当前用户 ID
 func adminID(tok string, app *testApp) string {
 	me := app.do("GET", "/api/me", tok, nil)
 	id, _ := me.Body["id"].(string)
 	return id
 }
 
-// TestBanHidesContent 验证封锁语义一致性（与「封号即下架」一致）：
-// 封锁只限制账号使用，已发布内容保持正常展示（按用户澄清：封号≠下架）
+// TestBanHidesContent 封锁只限制账号，已发布内容保持展示。
 func TestBanKeepsContent(t *testing.T) {
 	app, cleanup := newTestApp(t)
 	defer cleanup()

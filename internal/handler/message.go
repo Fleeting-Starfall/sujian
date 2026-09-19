@@ -64,7 +64,7 @@ func (s *Server) messageSend(w http.ResponseWriter, r *http.Request) {
 		s.writeJSON(w, 400, map[string]string{"error": "请求格式错误"})
 		return
 	}
-	// 文件消息（图片/视频/任意文件）：只校验媒体路径（须属于当前账号上传目录，防路径穿越），文本可空
+	// 文件消息：只校验媒体路径（防穿越）
 	switch body.MediaType {
 	case "image", "video", "file":
 		if body.Media == "" {

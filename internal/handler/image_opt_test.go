@@ -16,7 +16,7 @@ import (
 	"testing"
 )
 
-// makeNoisyPNG 生成带伪随机噪声的 PNG（模拟真实照片，PNG 体积大，便于验证压缩收益）
+// makeNoisyPNG 带噪声 PNG，便于验证压缩收益
 func makeNoisyPNG(size int, alpha uint8) []byte {
 	img := image.NewRGBA(image.Rect(0, 0, size, size))
 	seed := uint32(0x9e3779b9)
@@ -32,7 +32,7 @@ func makeNoisyPNG(size int, alpha uint8) []byte {
 	return buf.Bytes()
 }
 
-// makeGradientPNG 生成可压缩的渐变 PNG（用于上传集成测试，确保不超过上传大小上限）
+// makeGradientPNG 可压缩渐变 PNG
 func makeGradientPNG(size int, alpha uint8) []byte {
 	img := image.NewRGBA(image.Rect(0, 0, size, size))
 	for y := 0; y < size; y++ {
@@ -86,8 +86,7 @@ func TestOptimizeImage_UnknownFormat(t *testing.T) {
 	}
 }
 
-// TestUploadOptimizesImage 经真实 handler + 真实 store 验证：
-// 上传一张 2400px 大图后，落盘应为已缩放、更小的 .jpg（从源头控制存储占用）
+// TestUploadOptimizesImage 上传大图后落盘为缩放后的更小 jpg。
 func TestUploadOptimizesImage(t *testing.T) {
 	app, cleanup := newTestApp(t)
 	defer cleanup()
@@ -147,16 +146,13 @@ func TestUploadOptimizesImage(t *testing.T) {
 	_ = adminID
 }
 
-// TestUploadRejectsOversizeImage 验证 DoS 防护：攻击者用 image/* content-type +
-// 不带 Content-Length 的 part（header.Size=-1 绕过大小检查），实际发送远超
-// MaxImageMB 的 body 时，图片分支的 LimitReader 会截断并按超限拒绝，
-// 不会把整个超大请求体读进内存。
+// TestUploadRejectsOversizeImage 超大 body 被截断并按超限拒绝，不读进内存。
 func TestUploadRejectsOversizeImage(t *testing.T) {
 	app, cleanup := newTestApp(t)
 	defer cleanup()
 	token, _ := app.login(t, "admin", "admin123")
 
-	// 12MB 伪图片数据 > 图片读取上限(10MB + 1MB 余量)
+	// 12MB > 上限(10MB+1MB 余量)
 	payload := bytes.Repeat([]byte("A"), 12<<20)
 	var body bytes.Buffer
 	mw := multipart.NewWriter(&body)
@@ -180,9 +176,7 @@ func TestUploadRejectsOversizeImage(t *testing.T) {
 	}
 }
 
-// TestUploadRejectsDisguisedFile 验证：伪装成图片（image/* content-type + 图片扩展名）
-// 的非图片内容（如 HTML/脚本），在 optimizeImage 解码失败走「回退原样保存」前，
-// 会被 magic bytes 校验拦截，不会把可执行/不可信内容原样落盘。
+// TestUploadRejectsDisguisedFile 伪装图片被 magic bytes 拦截。
 func TestUploadRejectsDisguisedFile(t *testing.T) {
 	app, cleanup := newTestApp(t)
 	defer cleanup()
@@ -218,8 +212,7 @@ func TestUploadRejectsDisguisedFile(t *testing.T) {
 	}
 }
 
-// TestUploadTranscodesVideo 验证：环境有 ffmpeg 时，上传视频自动转码压缩
-// （H.264/AAC、720p、crf28），落盘文件应小于原始输入且可被 ffprobe 识别。
+// TestUploadTranscodesVideo 有 ffmpeg 时视频自动转码压缩。
 func TestUploadTranscodesVideo(t *testing.T) {
 	if _, err := exec.LookPath("ffmpeg"); err != nil {
 		t.Skip("环境无 ffmpeg，跳过视频转码测试")
@@ -228,7 +221,7 @@ func TestUploadTranscodesVideo(t *testing.T) {
 	defer cleanup()
 	token, _ := app.login(t, "admin", "admin123")
 
-	// 用 ffmpeg 生成一段高码率测试视频（1280x720、1s、~1MB），保证转码有明显收益
+	// 用 ffmpeg 生成高码率测试视频
 	tmpDir := t.TempDir()
 	src := filepath.Join(tmpDir, "src.mp4")
 	cmd := exec.Command("ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=duration=1:size=1280x720:rate=30",

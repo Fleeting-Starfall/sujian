@@ -18,7 +18,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 	if u == nil {
 		return
 	}
-	// 提前限制请求体（视频上限 200MB + 表单余量），防止超大文件被完整接收
+	// 提前限制请求体，防超大文件完整接收
 	limit := int64(s.Cfg.MaxVideoMB)<<20 + 1<<20
 	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	if err := r.ParseMultipartForm(int64(s.Cfg.MaxVideoMB) << 20); err != nil {
@@ -68,9 +68,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 
 	// 图片：上传时就地自动优化（缩放 + 转更省空间的格式），从源头控制存储占用
 	if kind == "image" {
-		// 读取上限设为图片上限(+1MB 余量)：防止攻击者用 image/* 的 content-type、
-		// 配合伪造的小 header.Size，实际发送远超 MaxImageMB 的 body 把内存撑爆(DoS)。
-		// 注意 header.Size 是客户端声明值、不可信，必须以实际读取字节数为准来限制。
+		// 读取上限图片上限(+1MB)：header.Size 不可信，防伪造超大 body(DoS)
 		imgLimit := int64(s.Cfg.MaxImageMB)<<20 + 1<<20
 		raw, rerr := io.ReadAll(io.LimitReader(file, imgLimit))
 		if rerr != nil {
@@ -109,7 +107,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 视频：有 ffmpeg 时自动转码压缩（H.264+AAC、720p、crf28），失败/无 ffmpeg/超大文件原样保存
+	// 有 ffmpeg 时转码压缩，否则原样保存
 	name := auth.ID("f_") + ext
 	tmp := filepath.Join(userDir, name+".orig")
 	if err := saveToFile(tmp, file); err != nil {
@@ -120,7 +118,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 	if stat, err := os.Stat(tmp); err == nil && stat.Size() <= maxVideoTranscodeBytes {
 		if outp, ok := transcodeVideo(tmp); ok {
 			final = outp
-			name = auth.ID("f_") + ".mp4" // 转码输出统一 .mp4（H.264/AAC 兼容性最好）
+			name = auth.ID("f_") + ".mp4" // 转码输出统一 .mp4
 		}
 	}
 	dst := filepath.Join(userDir, name)
@@ -129,7 +127,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if final != tmp {
-		_ = os.Remove(tmp) // 转码成功：删除原始大文件，真正省空间
+		_ = os.Remove(tmp) // 转码成功：删除原文件
 	}
 
 	path := "/uploads/" + u.ID + "/" + name
@@ -147,7 +145,7 @@ func saveToFile(dst string, file io.Reader) error {
 	return err
 }
 
-// maxVideoTranscodeBytes 视频转码体积上限：超过则不转码（避免超大视频阻塞发布太久）
+// maxVideoTranscodeBytes 转码体积上限，超限不转码
 const maxVideoTranscodeBytes = 30 << 20 // 30MB（转码约几秒~十几秒）
 
 // transcodeVideo 用 ffmpeg 把视频转成 H.264+AAC 的 mp4（缩放到 720p、crf28），

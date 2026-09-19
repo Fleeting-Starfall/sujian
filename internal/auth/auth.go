@@ -8,7 +8,7 @@ import (
 )
 
 // HashPassword 用随机 salt + SHA256 生成 "salt:hash"
-// 说明：采用标准库实现，零外部依赖，保证任意环境可直接编译运行。
+// 标准库实现，零外部依赖。
 // （cgo/外部包会带来离线构建失败风险；局域网内应用此强度足够）
 func HashPassword(pw string) string {
 	salt := randHex(16)

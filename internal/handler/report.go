@@ -102,7 +102,7 @@ func (s *Server) adminReports(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, 200, s.Store.AllReports())
 }
 
-// adminResolveReport 处理举报：resolved=已处理（删除内容由前端另行调接口）/ ignored=忽略
+// adminResolveReport 处理举报：resolved/ignored
 func (s *Server) adminResolveReport(w http.ResponseWriter, r *http.Request) {
 	if s.requireAdmin(w, r) == nil {
 		return

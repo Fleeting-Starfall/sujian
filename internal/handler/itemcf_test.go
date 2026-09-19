@@ -4,9 +4,7 @@ import (
 	"testing"
 )
 
-// TestItemCF 验证 Item-CF 协同过滤：用户 bob 互动(收藏)了笔记 A(tagA)；
-// 另一用户 carol 同时收藏了 A 和 B(tagB)。即便 bob 从未接触过 tagB，
-// 因「和 bob 相似(同样收藏 A)的 carol 也收藏了 B」，B 应被协同加权、排在无人共现的对照 C 之前。
+// TestItemCF 协同过滤：相似用户收藏过的笔记被加权。
 func TestItemCF(t *testing.T) {
 	app, cleanup := newTestApp(t)
 	defer cleanup()
@@ -67,8 +65,7 @@ func TestItemCF(t *testing.T) {
 	if app.do("POST", "/api/notes/"+noteB+"/favorite", carolTok, nil).Status != 200 {
 		t.Fatal("carol 收藏 B 失败")
 	}
-	// 注：noteC 无人收藏，作为无协同的对照
-
+	// noteC 无人收藏，作对照
 	// bob 的推荐：B 应因协同(经 A 共现)排在 C 之前
 	feed := app.do("GET", "/api/feed?sort=hot", bobTok, nil)
 	items, _ := feed.Body["items"].([]interface{})

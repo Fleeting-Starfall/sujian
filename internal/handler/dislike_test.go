@@ -4,9 +4,7 @@ import (
 	"testing"
 )
 
-// TestDislikeFeedback 验证「不感兴趣」负反馈：
-//  1. 点 dislike 后该笔记从首页推荐中消失
-//  2. 同类标签的其它笔记在推荐中被降权（排名不优于、且通常劣于未 dislike 前）
+// TestDislikeFeedback 「不感兴趣」后从推荐消失，同类标签降权。
 func TestDislikeFeedback(t *testing.T) {
 	app, cleanup := newTestApp(t)
 	defer cleanup()
@@ -87,8 +85,7 @@ func TestDislikeFeedback(t *testing.T) {
 	t.Logf("基线: A1排名=%d, B2在首屏=%v；dislike A1 后 A1已移除。B2在首屏=%v",
 		baseRankA1, baseHasB2, containsNoteID(afterItems, noteB2))
 
-	// 反向校验：dislike 应持久化（recommend 内部 IsDisliked 生效，上面已证明）；
-	// 同时确认未登录调用被拒
+	// 反向校验：dislike 持久化；未登录调用被拒
 	noLogin := app.do("POST", "/api/me/dislike", "", map[string]string{"noteID": noteA2})
 	if noLogin.Status != 401 {
 		t.Fatalf("未登录 dislike 应 401，实际 %d", noLogin.Status)

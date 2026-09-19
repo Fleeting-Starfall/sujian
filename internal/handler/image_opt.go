@@ -14,14 +14,9 @@ const (
 	optJPEGQuality = 82   // JPEG 质量（照片足够清晰且体积小）
 )
 
-// optimizeImage 把上传的图片在内存中缩放并转成更省空间的格式，从源头控制存储占用。
-//
-// 规则：
-//   - 不透明图片（绝大多数照片/截图）→ 转 JPEG(q82)，扩展名 .jpg
-//   - 含透明通道（贴纸、带透明底的 PNG）→ 保留 PNG，扩展名 .png
-//   - GIF（保留动图）、WebP（标准库无法解码）等 → 返回 ok=false，由调用方原样保存原始字节
-//
-// 返回 ok=false 时 out 为空，调用方应回退为保存原始上传字节，绝不丢数据。
+// optimizeImage 内存中缩放并转换格式
+// 不透明 → JPEG(q82)；透明 → PNG；GIF/WebP 原样保存（ok=false）
+// ok=false 时调用方回退保存原始字节
 func optimizeImage(r io.Reader) (out []byte, ext string, ok bool) {
 	raw, err := io.ReadAll(r)
 	if err != nil {
@@ -70,7 +65,7 @@ func maxInt(a, b int) int {
 	return b
 }
 
-// hasTransparency 采样扫描像素，判断图像是否含透明（alpha < 255）区域。
+// hasTransparency 判断图像是否含透明区域
 func hasTransparency(img image.Image) bool {
 	b := img.Bounds()
 	stepX, stepY := 1, 1
@@ -91,8 +86,7 @@ func hasTransparency(img image.Image) bool {
 	return false
 }
 
-// downscale 面积平均（box）下采样，纯 Go 无依赖，适合缩小尺寸。
-// 对 dst 每个像素，取其在 src 中对应矩形框内像素的平均值。
+// downscale 面积平均下采样
 func downscale(src image.Image, dw, dh int) *image.RGBA {
 	b := src.Bounds()
 	sw, sh := b.Dx(), b.Dy()

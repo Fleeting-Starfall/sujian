@@ -10,7 +10,7 @@ import (
 	"sujian/internal/store"
 )
 
-// Config 服务配置（端口、管理员预置账号、上传限制等）
+// Config 服务配置
 type Config struct {
 	Port       int
 	AdminUser  string
@@ -21,7 +21,7 @@ type Config struct {
 	PublicDir  string
 }
 
-// Server 持有数据层与配置，所有 handler 均为其方法
+// Server 数据层与配置，handler 为其方法
 type Server struct {
 	Store *store.Store
 	Cfg   Config
@@ -41,8 +41,8 @@ func (s *Server) writeJSON(w http.ResponseWriter, code int, v interface{}) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// userJSON 构造用户 JSON（对外的 PublicUser + 可选明文密码副本）。
-// includePlain 只在「本人查看自己」或「管理员查看」时为 true；其余场景绝不含密码。
+// userJSON 用户 JSON
+// includePlain 仅本人/管理员查看时为 true
 func userJSON(u *model.User, includePlain bool) map[string]interface{} {
 	b, _ := json.Marshal(model.ToPublic(u))
 	var m map[string]interface{}
@@ -59,7 +59,7 @@ func (s *Server) requireLogin(w http.ResponseWriter, r *http.Request) *model.Use
 		s.writeJSON(w, 401, map[string]string{"error": "未登录"})
 		return nil
 	}
-	// 临时封锁在此统一拦截：封禁期间所有已登录接口(含只读)均拒绝，到期自动恢复
+	// 封禁期间所有接口拒绝，到期自动恢复
 	if u.BannedUntil > time.Now().Unix() {
 		s.writeJSON(w, 403, map[string]string{"error": "账号已被封锁，请于 " + time.Unix(u.BannedUntil, 0).Format("01-02 15:04") + " 后重试"})
 		return nil
@@ -91,7 +91,7 @@ func (s *Server) requireAdmin(w http.ResponseWriter, r *http.Request) *model.Use
 	return u
 }
 
-// Page 返回一个带门禁的页面处理器。mode: public / auth / admin
+// Page 带门禁的页面处理器。mode: public/auth/admin
 func (s *Server) Page(file, mode string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if mode == "auth" && s.currentUser(r) == nil {

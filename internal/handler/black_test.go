@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// idsOf 从 feed / 列表响应里取出所有笔记 id（feed 类接口包裹在 items 下）
+// idsOf 从 feed/列表响应取笔记 id
 func idsOf(items interface{}) []string {
 	out := []string{}
 	if arr, ok := items.([]interface{}); ok {
@@ -29,7 +29,7 @@ func contains(items interface{}, id string) bool {
 	return false
 }
 
-// idsOfRaw 从裸 JSON 数组响应里取笔记 id（如 /api/user/{id}/notes 直接返回数组）
+// idsOfRaw 从裸 JSON 数组取笔记 id
 func idsOfRaw(raw []byte) []string {
 	var arr []map[string]interface{}
 	if err := json.Unmarshal(raw, &arr); err != nil {
@@ -53,11 +53,7 @@ func containsRaw(raw []byte, id string) bool {
 	return false
 }
 
-// TestBlackLevelVisibility 黑标（最高敏感）行为：
-//   - 不在首页 feed / 推荐 / 他人主页展示
-//   - 仅用户主动搜索可见
-//   - 详情需登录，且返回 sensitive + sensitiveLevel=black
-//   - 作者本人与管理员可见自己的黑标内容
+// TestBlackLevelVisibility 黑标：不进 feed/推荐/他人主页，仅搜索可见，详情需登录。
 func TestBlackLevelVisibility(t *testing.T) {
 	app, cleanup := newTestApp(t)
 	defer cleanup()
@@ -66,7 +62,7 @@ func TestBlackLevelVisibility(t *testing.T) {
 	if adminTok == "" {
 		t.Fatal("管理员登录失败")
 	}
-	// 普通用户（用于验证「他人视角」不可见）
+	// 普通用户（他人视角）
 	reg := app.do("POST", "/api/register", "", map[string]string{
 		"username": "bob", "password": "pass123", "nickname": "Bob",
 	})
@@ -86,7 +82,7 @@ func TestBlackLevelVisibility(t *testing.T) {
 	}
 	bobTok, _ := app.login(t, "bob", "pass123")
 
-	// 管理员发一篇笔记（admin 自动 published+green），再改级为黑标
+	// 管理员发笔记再改级为黑标
 	const title = "黑标专属搜索词xyz"
 	r := app.do("POST", "/api/notes", adminTok, map[string]interface{}{
 		"title": title, "content": "内容", "mediaType": "image",
@@ -130,7 +126,7 @@ func TestBlackLevelVisibility(t *testing.T) {
 	if !contains(search.Body["items"], blackID) {
 		t.Fatal("黑标应通过用户搜索可见")
 	}
-	// 3b) 未登录用户搜索黑标不可见（黑标最敏感，与详情一致必须登录；否则搜到却点不进去）
+	// 3b) 未登录搜索黑标不可见
 	anonSearch := app.do("GET", "/api/feed?q="+title, "", nil)
 	if contains(anonSearch.Body["items"], blackID) {
 		t.Fatal("黑标即使搜索，未登录用户也不应可见（需登录）")

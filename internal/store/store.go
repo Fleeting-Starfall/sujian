@@ -14,10 +14,8 @@ import (
 	"sujian/internal/model"
 )
 
-// Store 单文件 JSON 持久化 + 内存索引 + 会话管理。
-// 进程内加锁保证并发安全；每次写操作后原子落盘（写临时文件再 rename）。
-// RecoConfig 推荐打分权重配置（运营可调，data/reco_config.json）。
-// 任一字段为 0 或缺失时回退到 DefaultRecoConfig 对应值。
+// Store 数据层：JSON 持久化 + 内存索引。
+// RecoConfig 推荐权重配置；缺失项回退默认值。
 type RecoConfig struct {
 	WTag              float64 `json:"w_tag"`               // 兴趣画像权重
 	WCes              float64 `json:"w_ces"`               // CES 互动分权重
@@ -25,11 +23,11 @@ type RecoConfig struct {
 	WFollow           float64 `json:"w_follow"`            // 已关注作者社交权重
 	WCf               float64 `json:"w_cf"`                // 协同过滤（Item-CF）权重
 	DislikeTagPenalty float64 `json:"dislike_tag_penalty"` // 命中不感兴趣标签的每项降权
-	MaxPerTag         int     `json:"max_per_tag"`         // 普通用户的单标签上限（防茧房）
-	ColdMaxPerTag     int     `json:"cold_max_per_tag"`    // 冷启动（无真实行为）用户的单标签上限（更强多样）
+	MaxPerTag         int     `json:"max_per_tag"`         // 普通用户单标签上限
+	ColdMaxPerTag     int     `json:"cold_max_per_tag"`    // 冷启动用户单标签上限
 }
 
-// DefaultRecoConfig 默认权重（与历史硬编码一致）。
+// DefaultRecoConfig 默认权重。
 func DefaultRecoConfig() RecoConfig {
 	return RecoConfig{
 		WTag: 1.0, WCes: 5.0, WRec: 3.0, WFollow: 5.0, WCf: 2.0,
@@ -37,7 +35,7 @@ func DefaultRecoConfig() RecoConfig {
 	}
 }
 
-// loadRecoConfig 读取 data/reco_config.json；缺失或解析失败时保留默认值。
+// loadRecoConfig 读取权重配置。
 func (s *Store) loadRecoConfig() {
 	cfg := DefaultRecoConfig()
 	if b, err := os.ReadFile(filepath.Join(s.dir, "reco_config.json")); err == nil {
@@ -88,23 +86,22 @@ type Store struct {
 	Reports map[string]*model.Report
 	CLikes  map[string][]string // commentID -> [userID] 评论点赞
 	Msgs    map[string]*model.Message
-	// 浏览历史：userID -> noteID -> 最近浏览时间戳（同一篇只保留一条，上限 maxViewHistory 条）
+	// 浏览历史：userID -> noteID -> 最近浏览时间（同篇一条）
 	ViewHist map[string]map[string]int64
-	// 负反馈（不感兴趣）：userID -> noteID -> true。用于推荐纠偏：跳过该笔记并对同类标签降权。
+	// 负反馈：userID -> noteID -> true。推荐时跳过并降权同类标签。
 	Dislikes map[string]map[string]bool
 
-	// 推荐权重配置（运营可调，data/reco_config.json；缺失项用默认值）
+	// 推荐权重配置（可调）
 	RecoConfig RecoConfig
 
 	sessMu  sync.RWMutex
 	session map[string]string // token -> userID
 
-	// 浏览量节流落盘：浏览量属于高频低价值数据，累计变更或距上次落盘超过阈值才写盘，
-	// 避免每次浏览都全量写 JSON。崩溃最多丢 ~30s 的浏览数（进程退出时由 Save 兜底）。
+	// 浏览量节流落盘，崩溃最多丢约 30s（退出时 Save 兜底）
 	viewsDirty    int
 	viewsLastSave time.Time
 
-	// 浏览量去重：同一用户对同一笔记 30 分钟内只算 1 次浏览，避免疯狂刷新首页导致数字虚高。
+	// 浏览量去重：同一用户 30 分钟内只计 1 次
 	viewDedup   map[string]int64 // "userID|noteID" -> 最近一次浏览 unix 时间戳
 	viewDedupMu sync.Mutex
 }
@@ -154,11 +151,11 @@ func (s *Store) load() {
 	s.readJSON("messages.json", &s.Msgs)
 	s.readJSON("view_history.json", &s.ViewHist)
 	s.readJSON("dislikes.json", &s.Dislikes)
-	// 会话持久化：服务重启后登录状态仍保留
+	// 会话持久化
 	s.readJSON("sessions.json", &s.session)
 }
 
-// ensureUids 为缺少用户号的老用户补齐 8 位唯一用户号
+// ensureUids 补齐老用户的 8 位用户号
 func (s *Store) ensureUids() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -174,7 +171,7 @@ func (s *Store) ensureUids() {
 	}
 }
 
-// newUidLocked 生成未占用的 8 位用户号（调用方需持写锁）
+// newUidLocked 生成未占用用户号（持写锁）
 func (s *Store) newUidLocked() string {
 	for {
 		candidate := auth.RandChars(8)
@@ -197,7 +194,7 @@ func (s *Store) UserByUid(uid string) *model.User {
 	defer s.mu.RUnlock()
 	for _, u := range s.Users {
 		if u.Uid == uid {
-			cp := *u // 返回拷贝，避免调用方在锁外持有内部对象引发 data race
+			cp := *u // 拷贝
 			return &cp
 		}
 	}
@@ -212,17 +209,14 @@ func (s *Store) readJSON(name string, v interface{}) {
 	_ = json.Unmarshal(data, v)
 }
 
-// Save 原子落盘（全量）。不持有锁时调用（自行加读锁）。
-// 进程退出（SIGINT/SIGTERM）时兜底全量保存，保证任何遗漏的修改都不丢。
+// Save 全量原子落盘；退出时兜底保存。
 func (s *Store) Save() {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	s.saveLocked()
 }
 
-// saveLocked 落盘。调用方必须已持有 s.mu 锁（读或写）。
-// 性能优化：写方法只落盘自己修改的文件（传入文件名），避免每次小写操作
-// 都全量序列化全部 13 个数据文件（写放大）。无参数时全量落盘（Save 兜底）。
+// saveLocked 落盘（持锁调用），只落盘指定文件避免全量写放大。
 func (s *Store) saveLocked(names ...string) {
 	if len(names) == 0 {
 		s.writeJSON("users.json", s.Users)
@@ -279,7 +273,7 @@ func (s *Store) saveLocked(names ...string) {
 }
 
 func (s *Store) writeJSON(name string, v interface{}) {
-	// 紧凑序列化（去掉缩进空白），所有 data/*.json 落盘体积约减 20-30%
+	// 紧凑序列化，落盘体积约减 20-30%
 	data, err := json.Marshal(v)
 	if err != nil {
 		return
@@ -294,7 +288,7 @@ func (s *Store) writeJSON(name string, v interface{}) {
 
 // ---------- 会话 ----------
 
-// saveSessionsLocked 持久化会话表（调用方需已持有 sessMu）
+// saveSessionsLocked 持久化会话表（持 sessMu）
 func (s *Store) saveSessionsLocked() {
 	s.writeJSON("sessions.json", s.session)
 }
@@ -324,7 +318,7 @@ func (s *Store) UserByToken(t string) *model.User {
 		s.mu.RUnlock()
 		return nil
 	}
-	cp := *u // 持锁期间完成拷贝，避免与写锁内的修改构成 data race
+	cp := *u // 拷贝
 	s.mu.RUnlock()
 	return &cp
 }
@@ -336,7 +330,7 @@ func (s *Store) DeleteSession(t string) {
 	s.sessMu.Unlock()
 }
 
-// DeleteUserSessions 使某用户的所有会话失效（重置密码时调用，踢掉该用户所有旧登录）
+// DeleteUserSessions 使某用户所有会话失效
 func (s *Store) DeleteUserSessions(userID string) {
 	s.sessMu.Lock()
 	for t, uid := range s.session {
@@ -348,7 +342,7 @@ func (s *Store) DeleteUserSessions(userID string) {
 	s.sessMu.Unlock()
 }
 
-// RecordLogin 记录用户最近一次登录 IP 与时间（用于后台展示）
+// RecordLogin 记录最近登录 IP 与时间
 func (s *Store) RecordLogin(userID, ip string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -371,7 +365,7 @@ func (s *Store) Register(username, nickname, pw string, interests []string) (*mo
 			return nil, fmt.Errorf("用户名已被占用")
 		}
 	}
-	// 清洗兴趣标签：去空、去重、上限 10 个
+	// 清洗兴趣标签
 	clean := []string{}
 	seen := map[string]bool{}
 	for _, t := range interests {
@@ -415,7 +409,7 @@ func (s *Store) Login(username, pw string) (*model.User, error) {
 		s.mu.RUnlock()
 		return nil, fmt.Errorf("用户不存在")
 	}
-	cp := *found // 持锁期间完成拷贝，避免与写锁内的修改构成 data race
+	cp := *found // 拷贝
 	s.mu.RUnlock()
 	if !auth.CheckPassword(pw, cp.PasswordHash) {
 		return nil, fmt.Errorf("密码错误")
@@ -432,7 +426,7 @@ func (s *Store) Login(username, pw string) (*model.User, error) {
 	return &cp, nil
 }
 
-// SeedAdmin 首次启动若无任何管理员，则创建预置管理员
+// SeedAdmin 无管理员时创建预置管理员
 func (s *Store) SeedAdmin(username, pw string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -456,7 +450,7 @@ func (s *Store) SeedAdmin(username, pw string) {
 	s.saveLocked("users.json")
 }
 
-// AdminCreateUser 管理员批量创建用户：直接 active，可设定官方认证
+// AdminCreateUser 管理员批量创建用户
 func (s *Store) AdminCreateUser(username, nickname, pw string, officialVerified bool) (*model.User, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -482,7 +476,7 @@ func (s *Store) AdminCreateUser(username, nickname, pw string, officialVerified 
 	return u, nil
 }
 
-// SetAgeVerified 设置/取消用户年龄认证（成年标记）。管理员通过审核时清除申请状态；取消认证时一并重置申请状态
+// SetAgeVerified 设置/取消年龄认证
 func (s *Store) SetAgeVerified(id string, v bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -497,7 +491,7 @@ func (s *Store) SetAgeVerified(id string, v bool) error {
 	return nil
 }
 
-// RequestAgeVerify 用户主动提交成年认证申请（待管理员审核）
+// RequestAgeVerify 提交年龄认证申请
 func (s *Store) RequestAgeVerify(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -517,7 +511,7 @@ func (s *Store) RequestAgeVerify(id string) error {
 	return nil
 }
 
-// RejectAgeVerify 管理员拒绝用户的成年认证申请（用户可再次申请）
+// RejectAgeVerify 拒绝年龄认证申请
 func (s *Store) RejectAgeVerify(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -531,7 +525,7 @@ func (s *Store) RejectAgeVerify(id string) error {
 	return nil
 }
 
-// PendingAgeVerifyUsers 返回已提交成年认证申请、待管理员审核的用户
+// PendingAgeVerifyUsers 待审核的年龄认证申请
 func (s *Store) PendingAgeVerifyUsers() []model.PublicUser {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -544,7 +538,7 @@ func (s *Store) PendingAgeVerifyUsers() []model.PublicUser {
 	return out
 }
 
-// RequestOfficialVerify 用户提交官方认证申请（材料说明 + 附件），待管理员审核
+// RequestOfficialVerify 提交官方认证申请
 func (s *Store) RequestOfficialVerify(id, material string, files []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -581,7 +575,7 @@ func (s *Store) SetOfficialVerified(id string, v bool) error {
 	return nil
 }
 
-// RejectOfficialVerify 管理员拒绝官方认证申请（用户可再次申请）
+// RejectOfficialVerify 拒绝官方认证申请
 func (s *Store) RejectOfficialVerify(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -595,7 +589,7 @@ func (s *Store) RejectOfficialVerify(id string) error {
 	return nil
 }
 
-// PendingOfficialUsers 返回已提交官方认证申请、待管理员审核的用户
+// PendingOfficialUsers 待审核的官方认证申请
 func (s *Store) PendingOfficialUsers() []model.AdminUserView {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -608,9 +602,7 @@ func (s *Store) PendingOfficialUsers() []model.AdminUserView {
 	return out
 }
 
-// SetUserStatus 修改账号状态（active / pending / rejected / …）。
-// 管理员账号不允许被置为非 active：否则系统会失去唯一可登录的管理员，
-// 后台再也进不去，只能手工改 data/users.json 才能恢复（与 SetUserBan 的保护保持一致）。
+// SetUserStatus 修改账号状态
 func (s *Store) SetUserStatus(id, status string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -626,8 +618,7 @@ func (s *Store) SetUserStatus(id, status string) error {
 	return nil
 }
 
-// SetUserBan 设置/解除临时封锁。until=0 表示解除封锁；>0 表示封锁至该时间戳。
-// 到期自动解封：鉴权处实时比较 BannedUntil 与当前时间，无需定时任务。
+// SetUserBan 设置/解除临时封锁（到期自动解封）
 func (s *Store) SetUserBan(id string, until int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -643,7 +634,7 @@ func (s *Store) SetUserBan(id string, until int64) error {
 	return nil
 }
 
-// PendingUsers 返回待审核用户（内部加锁，供管理后台调用）
+// PendingUsers 待审核用户
 func (s *Store) PendingUsers() []model.PublicUser {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -667,7 +658,7 @@ func (s *Store) AllUsers() []model.PublicUser {
 	return out
 }
 
-// AllUsersAdminView 返回全部用户（含登录 IP 等隐私，仅供管理后台）
+// AllUsersAdminView 全部用户（含隐私，仅供后台）
 func (s *Store) AllUsersAdminView() []model.AdminUserView {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -686,13 +677,12 @@ func (s *Store) UserByID(id string) *model.User {
 		s.mu.RUnlock()
 		return nil
 	}
-	cp := *u // 持锁期间完成拷贝，避免与写锁内的修改构成 data race
+	cp := *u // 拷贝
 	s.mu.RUnlock()
 	return &cp
 }
 
-// UpdateProfile 更新昵称/简介/头像（空字符串表示不修改对应字段；bio 允许清空需显式传值）
-// UpdateProfile 更新昵称/简介/头像。bio 用指针以支持"清空简介"。
+// UpdateProfile 更新昵称/简介/头像（bio 指针支持清空）
 func (s *Store) UpdateProfile(id, nickname string, bio *string, avatar string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -713,7 +703,7 @@ func (s *Store) UpdateProfile(id, nickname string, bio *string, avatar string) e
 	return nil
 }
 
-// UserCounts 个人主页统计：笔记数 / 获赞 / 关注中 / 粉丝
+// UserCounts 个人主页统计
 func (s *Store) UserCounts(userID string) map[string]int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -736,7 +726,7 @@ func (s *Store) UserCounts(userID string) map[string]int {
 	return map[string]int{"notes": notes, "likes": likes, "following": following, "followers": followers}
 }
 
-// IsFollowing 判断 userID 是否已关注 targetID
+// IsFollowing 是否已关注
 func (s *Store) IsFollowing(userID, targetID string) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -748,7 +738,7 @@ func (s *Store) IsFollowing(userID, targetID string) bool {
 	return false
 }
 
-// FavNotesOf 返回某用户收藏的已发布笔记（按时间倒序）
+// FavNotesOf 收藏的已发布笔记
 func (s *Store) FavNotesOf(userID string) []*model.Note {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -757,7 +747,7 @@ func (s *Store) FavNotesOf(userID string) []*model.Note {
 		for _, id := range users {
 			if id == userID {
 				if n, ok := s.Notes[noteID]; ok && n.Status == "published" {
-					cp := *n // 拷贝，避免返回内部对象引发 data race
+					cp := *n // 拷贝
 					out = append(out, &cp)
 				}
 				break
@@ -780,12 +770,12 @@ func (s *Store) AddNote(author *model.User, title, content, mediaType string, me
 	s.mu.Lock()
 	s.Notes[n.ID] = n
 	s.saveLocked("notes.json")
-	cp := *n // 持锁期间拷贝，避免返回内部对象引发 data race
+	cp := *n // 拷贝
 	s.mu.Unlock()
 	return &cp
 }
 
-// ReviewNote 审核定级：status 传 "published"（通过）或 "rejected"（驳回）；通过时必须给 level
+// ReviewNote 审核定级（published/rejected）
 func (s *Store) ReviewNote(id, status, level string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -827,8 +817,8 @@ func (s *Store) RemoveNote(id, userID string, isAdmin bool) error {
 	return nil
 }
 
-// purgeNoteLocked 物理删除一条笔记及其全部关联数据（likes / favs / comments / clikes / notifs）
-// 调用方需持写锁。返回被删笔记的作者 ID 与媒体列表，便于 handler 清理磁盘文件。
+// purgeNoteLocked 物理删除笔记及其关联数据（持写锁）
+// 返回作者与媒体列表，便于 handler 清理磁盘文件。
 func (s *Store) purgeNoteLocked(id string) (string, []string) {
 	n, ok := s.Notes[id]
 	if !ok {
@@ -839,7 +829,7 @@ func (s *Store) purgeNoteLocked(id string) (string, []string) {
 	delete(s.Notes, id)
 	delete(s.Likes, id)
 	delete(s.Favs, id)
-	// 清理该笔记下的所有评论及其点赞
+	// 清理评论及其点赞
 	for cid, c := range s.Commen {
 		if c.NoteID == id {
 			delete(s.Commen, cid)
@@ -851,7 +841,7 @@ func (s *Store) purgeNoteLocked(id string) (string, []string) {
 	return authorID, media
 }
 
-// PurgeNote 永久删除一条笔记（任何状态；管理员专用）
+// PurgeNote 永久删除笔记（管理员）
 func (s *Store) PurgeNote(id string) ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -863,21 +853,19 @@ func (s *Store) PurgeNote(id string) ([]string, error) {
 	return media, nil
 }
 
-// PurgeOldRemovedNotes 永久清理已下架超过 maxAge 的笔记（含其 likes/favs/comments/notifs）。
-// 返回被清理的笔记数，以及「作者 ID -> 该作者待删媒体路径」的映射，供 handler 删除磁盘文件
-// （下架时为保留可恢复能力不删文件，因此这里是媒体文件唯一的清理时机，漏掉就是磁盘泄漏）。
-// 已下架但 RemovedAt=0 的视为历史数据（兜底清理）。
+// PurgeOldRemovedNotes 清理下架超 maxAge 的笔记
+// 返回清理数与待删媒体路径，供 handler 删磁盘文件
 func (s *Store) PurgeOldRemovedNotes(maxAge time.Duration) (int, map[string][]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cutoff := time.Now().Add(-maxAge).Unix()
-	// 先收集待清理的 id 再删除，避免 map 迭代中修改导致的计数偏差
+	// 先收集 id 再删除，避免迭代中修改 map
 	ids := []string{}
 	for id, n := range s.Notes {
 		if n.Status != "removed" {
 			continue
 		}
-		// 历史数据 RemovedAt=0 → 视为待清理；否则下架距今 >= maxAge 即到期
+		// RemovedAt=0 视为历史数据，一并清理
 		if n.RemovedAt == 0 || n.RemovedAt <= cutoff {
 			ids = append(ids, id)
 		}
@@ -895,7 +883,7 @@ func (s *Store) PurgeOldRemovedNotes(maxAge time.Duration) (int, map[string][]st
 	return len(ids), mediaByAuthor, nil
 }
 
-// NotesByAuthor 某作者的已发布笔记（置顶优先，再按时间倒序）
+// NotesByAuthor 某作者已发布笔记
 func (s *Store) NotesByAuthor(authorID string) []*model.Note {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -903,7 +891,7 @@ func (s *Store) NotesByAuthor(authorID string) []*model.Note {
 	for _, n := range s.Notes {
 		if n.AuthorID == authorID && n.Status == "published" {
 			if author, ok := s.Users[authorID]; ok && author.Status != "active" {
-				continue // 被禁用户的笔记不再展示（临时封锁不影响内容展示）
+				continue // 被禁用户笔记不展示
 			}
 			cp := *n
 			out = append(out, &cp)
@@ -918,7 +906,7 @@ func (s *Store) NotesByAuthor(authorID string) []*model.Note {
 	return out
 }
 
-// NotesByAuthorAll 某作者的全部笔记（含 pending/rejected，仅供作者本人查看）
+// NotesByAuthorAll 某作者全部笔记
 func (s *Store) NotesByAuthorAll(authorID string) []*model.Note {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -933,7 +921,7 @@ func (s *Store) NotesByAuthorAll(authorID string) []*model.Note {
 	return out
 }
 
-// SetPin 置顶/取消置顶（仅作者本人）
+// SetPin 置顶/取消置顶
 func (s *Store) SetPin(id, userID string, pinned bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -949,7 +937,7 @@ func (s *Store) SetPin(id, userID string, pinned bool) error {
 	return nil
 }
 
-// SetUserPassword 重置用户密码（管理后台）。newPlain 为明文副本，一并记录以便管理员查看。
+// SetUserPassword 重置用户密码（记录明文副本）
 func (s *Store) SetUserPassword(id, newHash, newPlain string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -963,8 +951,8 @@ func (s *Store) SetUserPassword(id, newHash, newPlain string) error {
 	return nil
 }
 
-// ChangePassword 用户自助修改密码：校验旧密码正确后写入新密码哈希与明文副本。
-// 调用方（handler）负责在成功后使该用户旧会话失效（DeleteUserSessions）。
+// ChangePassword 改密：校验旧密码后写入新哈希
+// 成功后由 handler 使旧会话失效。
 func (s *Store) ChangePassword(userID, oldPw, newHash, newPlain string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -981,7 +969,7 @@ func (s *Store) ChangePassword(userID, oldPw, newHash, newPlain string) error {
 	return nil
 }
 
-// NotesList 返回已发布笔记（可选 category / 关键词 / 仅关注 / 排序 order=hot|new）
+// NotesList 已发布笔记（筛选/排序）
 func (s *Store) NotesList(category, q string, following map[string]bool, order string) []*model.Note {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -991,10 +979,10 @@ func (s *Store) NotesList(category, q string, following map[string]bool, order s
 			continue
 		}
 		if author, ok := s.Users[n.AuthorID]; ok && author.Status != "active" {
-			continue // 被禁用户的笔记不再展示（临时封锁不影响内容展示）
+			continue // 被禁用户笔记不展示
 		}
 		if q == "" && n.Level == "black" {
-			continue // 黑标：仅搜索可见，浏览/分类/首页不展示
+			continue // 黑标：仅搜索可见
 		}
 		if category != "" && category != "推荐" && n.Category != category {
 			continue
@@ -1033,7 +1021,7 @@ func (s *Store) NotesList(category, q string, following map[string]bool, order s
 	return out
 }
 
-// noteScore 热度分：点赞 + 评论×2（调用方需持有读锁）
+// noteScore 热度分（持读锁）
 func (s *Store) noteScore(n *model.Note) int {
 	cc := 0
 	for _, c := range s.Commen {
@@ -1044,7 +1032,7 @@ func (s *Store) noteScore(n *model.Note) int {
 	return len(s.Likes[n.ID]) + cc*2
 }
 
-// NoteRaw 按 ID 取笔记（含已下架，供管理/删除清理用）
+// NoteRaw 按 ID 取笔记（含已下架）
 func (s *Store) NoteRaw(id string) *model.Note {
 	s.mu.RLock()
 	n, ok := s.Notes[id]
@@ -1052,12 +1040,12 @@ func (s *Store) NoteRaw(id string) *model.Note {
 		s.mu.RUnlock()
 		return nil
 	}
-	cp := *n // 持锁期间完成拷贝，避免与写锁内的修改构成 data race
+	cp := *n // 拷贝
 	s.mu.RUnlock()
 	return &cp
 }
 
-// AllNotes 全部笔记（含 pending/rejected/removed，管理后台用），时间倒序
+// AllNotes 全部笔记（后台用）
 func (s *Store) AllNotes() []*model.Note {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1077,7 +1065,7 @@ func (s *Store) NoteByID(id string) *model.Note {
 		s.mu.RUnlock()
 		return nil
 	}
-	cp := *n // 持锁期间完成拷贝，避免与写锁内的修改构成 data race
+	cp := *n // 拷贝
 	s.mu.RUnlock()
 	return &cp
 }
@@ -1116,14 +1104,14 @@ func (s *Store) ToggleFav(noteID, userID string) bool {
 	return true
 }
 
-// LikeCount 笔记点赞总数（实时内存计数）
+// LikeCount 点赞总数
 func (s *Store) LikeCount(id string) int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return len(s.Likes[id])
 }
 
-// FavCount 笔记收藏总数（实时内存计数）
+// FavCount 收藏总数
 func (s *Store) FavCount(id string) int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1139,7 +1127,7 @@ func (s *Store) AddComment(noteID, userID, userName, content, parentID, replyTo 
 	s.mu.Lock()
 	s.Commen[c.ID] = c
 	s.saveLocked("comments.json")
-	cp := *c // 持锁期间拷贝，避免返回内部对象引发 data race
+	cp := *c // 拷贝
 	s.mu.Unlock()
 	return &cp
 }
@@ -1151,13 +1139,12 @@ func (s *Store) CommentByID(id string) *model.Comment {
 		s.mu.RUnlock()
 		return nil
 	}
-	cp := *c // 持锁期间完成拷贝，避免与写锁内的修改构成 data race
+	cp := *c // 拷贝
 	s.mu.RUnlock()
 	return &cp
 }
 
-// CommentsByNote 返回某笔记的评论（楼中楼结构）。
-// order: "hot" 顶层按回复数降序，其余按时间正序；子评论固定跟在父评论后。
+// CommentsByNote 某笔记评论（楼中楼；order=hot/new）
 func (s *Store) CommentsByNote(noteID, order string) []*model.Comment {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1196,7 +1183,7 @@ func (s *Store) CommentsByNote(noteID, order string) []*model.Comment {
 	return out
 }
 
-// clearNotifsOf 清理引用指定笔记或评论的通知（调用方需持写锁）
+// clearNotifsOf 清理相关通知（持写锁）
 func (s *Store) clearNotifsOf(noteID, commentID string) {
 	for id, n := range s.Notifs {
 		if (noteID != "" && n.NoteID == noteID) || (commentID != "" && n.CommentID == commentID) {
@@ -1205,10 +1192,9 @@ func (s *Store) clearNotifsOf(noteID, commentID string) {
 	}
 }
 
-// deleteCommentLocked 删除一条评论并级联删除其楼中楼子回复（调用方需持写锁）。
-// 若不清理子评论，父评论被删后子回复会变成"孤儿"：既不展示、又残留计数与通知。
+// deleteCommentLocked 删除评论并级联删子回复（持写锁）
 func (s *Store) deleteCommentLocked(id string) {
-	// 先递归删除子评论
+	// 递归删子评论
 	children := []string{}
 	for cid, c := range s.Commen {
 		if c.ParentID == id {
@@ -1234,7 +1220,7 @@ func (s *Store) DeleteComment(id string) error {
 	return nil
 }
 
-// DeleteCommentFor 删除评论：作者本人或管理员（级联删除子回复）
+// DeleteCommentFor 删除评论（本人或管理员）
 func (s *Store) DeleteCommentFor(id, userID string, isAdmin bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1250,8 +1236,7 @@ func (s *Store) DeleteCommentFor(id, userID string, isAdmin bool) error {
 	return nil
 }
 
-// IncViews 笔记浏览数 +n（n 通常为 1）。
-// 节流落盘：累计 20 次变更或距上次落盘超过 30 秒才写一次盘，避免高并发浏览触发频繁全量 JSON 写。
+// IncViews 浏览数 +n，节流落盘。
 func (s *Store) IncViews(id string, n int) {
 	if n <= 0 {
 		return
@@ -1271,14 +1256,11 @@ func (s *Store) IncViews(id string, n int) {
 	}
 }
 
-// viewDedupWindow 同一用户对同一笔记的浏览去重窗口（默认 30 分钟）。
-// 防止首页瀑布流卡片被反复看到时浏览量疯涨；同时也让「浏览记录」语义合理——
-// 30 分钟内的重复曝光算作 1 次「看过」，而不是 10 次。
+// viewDedupWindow 浏览去重窗口（30 分钟）
 const viewDedupWindow = 30 * time.Minute
 
-// IncViewsDedup 带用户维度的浏览去重：同一用户对同一笔记 30 分钟内只 +1 次浏览。
-// 返回 true 表示本次实际累计了浏览量（用于给上层决定是否写浏览历史等）。
-// 进程退出时不持久化去重状态——重启后重新计数无副作用。
+// IncViewsDedup 带用户维度去重的浏览 +1
+// 返回 true 表示实际累计
 func (s *Store) IncViewsDedup(noteID, userID string, n int) bool {
 	if userID == "" || noteID == "" || n <= 0 {
 		return false
@@ -1292,7 +1274,7 @@ func (s *Store) IncViewsDedup(noteID, userID string, n int) bool {
 		return false
 	}
 	s.viewDedup[key] = now
-	// 顺手清理过期条目，防止长跑后 map 膨胀
+	// 顺带清理过期条目
 	if len(s.viewDedup) > 4096 {
 		for k, t := range s.viewDedup {
 			if now-t >= int64(viewDedupWindow.Seconds()) {
@@ -1307,17 +1289,16 @@ func (s *Store) IncViewsDedup(noteID, userID string, n int) bool {
 
 // ---------- 浏览历史 ----------
 
-// maxViewHistory 每个用户浏览历史上限（条），超出自动淘汰最旧的。
+// maxViewHistory 浏览历史上限，超出淘汰最旧
 const maxViewHistory = 200
 
-// HistoryEntry 一条浏览历史记录（noteID + 最近浏览时间）
+// HistoryEntry 浏览历史记录
 type HistoryEntry struct {
 	NoteID   string
 	ViewedAt int64
 }
 
-// RecordView 记录一次浏览历史：同一篇笔记只保留一条，更新时间戳（列表自动按时间倒序）。
-// 仅登录用户调用（匿名访问无"我的历史"概念）。
+// RecordView 记录浏览历史（同篇一条，更新时间戳）
 func (s *Store) RecordView(userID, noteID string) {
 	if userID == "" || noteID == "" {
 		return
@@ -1329,9 +1310,7 @@ func (s *Store) RecordView(userID, noteID string) {
 		m = map[string]int64{}
 		s.ViewHist[userID] = m
 	}
-	// 时间戳全局单调递增：新浏览始终严格大于现有全部记录与墙钟，
-	// 同一秒内先后浏览的不同笔记也能保持「最近浏览」顺序稳定可区分。
-	// （真实场景每秒浏览多篇概率极低；即便轻微超前墙钟，前端也按「刚刚」展示，无碍）
+	// 时间戳单调递增，保持顺序稳定
 	now := time.Now().Unix()
 	for _, ts := range m {
 		if ts >= now {
@@ -1339,7 +1318,7 @@ func (s *Store) RecordView(userID, noteID string) {
 		}
 	}
 	m[noteID] = now
-	// 上限：超出时淘汰最旧一条（时间戳相同则按笔记 ID 字典序，保证确定性）
+	// 超出上限淘汰最旧一条
 	if len(m) > maxViewHistory {
 		oldestID := ""
 		for id, ts := range m {
@@ -1354,7 +1333,7 @@ func (s *Store) RecordView(userID, noteID string) {
 	s.saveLocked("view_history.json")
 }
 
-// ViewHistory 返回某用户的浏览历史（按最近浏览时间倒序）
+// ViewHistory 浏览历史（倒序）
 func (s *Store) ViewHistory(userID string) []HistoryEntry {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1391,7 +1370,7 @@ func (s *Store) ClearHistory(userID string) {
 
 // ---------- 负反馈（不感兴趣） ----------
 
-// AddDislike 记录用户对某笔记的「不感兴趣」。幂等：重复调用不报错。
+// AddDislike 记录「不感兴趣」（幂等）
 func (s *Store) AddDislike(userID, noteID string) {
 	if userID == "" || noteID == "" {
 		return
@@ -1405,8 +1384,7 @@ func (s *Store) AddDislike(userID, noteID string) {
 	s.saveLocked("dislikes.json")
 }
 
-// RemoveDislike 撤销用户对某笔记的「不感兴趣」（前端「撤销」操作时调用），
-// 使该笔记与同类标签恢复推荐。
+// RemoveDislike 撤销「不感兴趣」
 func (s *Store) RemoveDislike(userID, noteID string) {
 	if userID == "" || noteID == "" {
 		return
@@ -1422,8 +1400,7 @@ func (s *Store) RemoveDislike(userID, noteID string) {
 	s.saveLocked("dislikes.json")
 }
 
-// IsDisliked 该用户是否对某笔记点过「不感兴趣」（调用方需酌情持锁；这里读不持锁，
-// 仅在单线程推荐流程内调用，且 Dislikes 写操作带锁 + map 不扩容读取安全）。
+// IsDisliked 是否点过「不感兴趣」
 func (s *Store) IsDisliked(userID, noteID string) bool {
 	m := s.Dislikes[userID]
 	if m == nil {
@@ -1432,8 +1409,7 @@ func (s *Store) IsDisliked(userID, noteID string) bool {
 	return m[noteID]
 }
 
-// DislikedTags 该用户所有「不感兴趣」笔记的标签集合（去重）。用于推荐时同类标签降权。
-// 调用方需持读锁（内部遍历 s.Notes / s.Dislikes）。
+// DislikedTags 不感兴趣笔记的标签集合
 func (s *Store) DislikedTags(userID string) map[string]bool {
 	out := map[string]bool{}
 	m := s.Dislikes[userID]
@@ -1450,7 +1426,7 @@ func (s *Store) DislikedTags(userID string) map[string]bool {
 	return out
 }
 
-// ToggleCommentLike 评论点赞/取消赞，返回当前是否已点赞
+// ToggleCommentLike 评论点赞/取消赞
 func (s *Store) ToggleCommentLike(commentID, userID string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1490,7 +1466,7 @@ func (s *Store) CommentLikedBy(commentID, userID string) bool {
 	return false
 }
 
-// FillCommentViews 给评论填充"当前浏览者是否已赞"（不落盘）
+// FillCommentViews 填充评论「我赞过」
 func (s *Store) FillCommentViews(comments []*model.Comment, viewerID string) {
 	if viewerID == "" {
 		return
@@ -1526,7 +1502,7 @@ func (s *Store) ToggleFollow(userID, targetID string) bool {
 	return true
 }
 
-// FollowingSet 返回某用户关注的对象集合，供"关注"流过滤
+// FollowingSet 关注对象集合
 func (s *Store) FollowingSet(userID string) map[string]bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1539,7 +1515,7 @@ func (s *Store) FollowingSet(userID string) map[string]bool {
 
 // ---------- 好友 ----------
 
-// SendFriendRequest 按用户号发送好友请求
+// SendFriendRequest 发送好友请求
 func (s *Store) SendFriendRequest(fromID, toUid string) (*model.FriendRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1559,7 +1535,7 @@ func (s *Store) SendFriendRequest(fromID, toUid string) (*model.FriendRequest, e
 	if s.isFriendLocked(fromID, to.ID) {
 		return nil, fmt.Errorf("你们已经是好友了")
 	}
-	// 存在任一 pending 请求则拒绝重复发送
+	// 已有 pending 请求则拒绝
 	for _, r := range s.Reqs {
 		if r.Status == "pending" && ((r.FromID == fromID && r.ToID == to.ID) || (r.FromID == to.ID && r.ToID == fromID)) {
 			return nil, fmt.Errorf("已存在待处理的好友请求")
@@ -1587,14 +1563,14 @@ func (s *Store) isFriendLocked(a, b string) bool {
 	return false
 }
 
-// FriendRequestsTo 我收到的好友请求（pending）
+// FriendRequestsTo 收到的好友请求
 func (s *Store) FriendRequestsTo(userID string) []*model.FriendRequest {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := []*model.FriendRequest{}
 	for _, r := range s.Reqs {
 		if r.ToID == userID && r.Status == "pending" {
-			cp := *r // 拷贝，避免返回内部对象引发 data race
+			cp := *r // 拷贝
 			out = append(out, &cp)
 		}
 	}
@@ -1602,14 +1578,14 @@ func (s *Store) FriendRequestsTo(userID string) []*model.FriendRequest {
 	return out
 }
 
-// FriendRequestsFrom 我发出的好友请求（pending）
+// FriendRequestsFrom 发出的好友请求
 func (s *Store) FriendRequestsFrom(userID string) []*model.FriendRequest {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := []*model.FriendRequest{}
 	for _, r := range s.Reqs {
 		if r.FromID == userID && r.Status == "pending" {
-			cp := *r // 拷贝，避免返回内部对象引发 data race
+			cp := *r // 拷贝
 			out = append(out, &cp)
 		}
 	}
@@ -1617,7 +1593,7 @@ func (s *Store) FriendRequestsFrom(userID string) []*model.FriendRequest {
 	return out
 }
 
-// ReqByID 按 ID 取好友请求（供 accept 后通知使用）
+// ReqByID 按 ID 取好友请求
 func (s *Store) ReqByID(id string) *model.FriendRequest {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1625,11 +1601,11 @@ func (s *Store) ReqByID(id string) *model.FriendRequest {
 	if !ok {
 		return nil
 	}
-	cp := *r // 拷贝，避免返回内部对象引发 data race
+	cp := *r // 拷贝
 	return &cp
 }
 
-// AcceptFriendRequest 接受好友请求（仅接收方可）
+// AcceptFriendRequest 接受好友请求
 func (s *Store) AcceptFriendRequest(id, userID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1680,7 +1656,7 @@ func (s *Store) FriendsOf(userID string) []*model.User {
 	return out
 }
 
-// RemoveFriend 删除好友（双向移除）
+// RemoveFriend 删除好友
 func (s *Store) RemoveFriend(userID, friendID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1702,7 +1678,7 @@ func (s *Store) RemoveFriend(userID, friendID string) error {
 	return nil
 }
 
-// Relation 两人关系：none / friend / requestSent / requestReceived
+// Relation 两人关系
 func (s *Store) Relation(meID, otherID string) string {
 	if meID == otherID {
 		return "self"
@@ -1728,7 +1704,7 @@ func (s *Store) Relation(meID, otherID string) string {
 
 // ---------- 私信 ----------
 
-// AddMessage 发送一条站内私信
+// AddMessage 发送私信
 func (s *Store) AddMessage(fromID, fromName, toID, content, mediaType, media, mediaName string, mediaSize int64) *model.Message {
 	m := &model.Message{
 		ID: auth.ID("m_"), FromID: fromID, FromName: fromName, ToID: toID,
@@ -1738,12 +1714,12 @@ func (s *Store) AddMessage(fromID, fromName, toID, content, mediaType, media, me
 	s.mu.Lock()
 	s.Msgs[m.ID] = m
 	s.saveLocked("messages.json")
-	cp := *m // 持锁期间拷贝，避免返回内部对象引发 data race
+	cp := *m // 拷贝
 	s.mu.Unlock()
 	return &cp
 }
 
-// MessagesBetween 两人之间的全部消息（时间正序）
+// MessagesBetween 两人的消息（正序）
 func (s *Store) MessagesBetween(a, b string) []*model.Message {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1758,7 +1734,7 @@ func (s *Store) MessagesBetween(a, b string) []*model.Message {
 	return out
 }
 
-// ConversationsOf 某用户的所有会话（按最后消息时间倒序）
+// ConversationsOf 会话列表（倒序）
 func (s *Store) ConversationsOf(userID string) []model.Conversation {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1794,7 +1770,7 @@ func (s *Store) ConversationsOf(userID string) []model.Conversation {
 	return out
 }
 
-// UnreadMessagesCount 某用户所有未读私信总数
+// UnreadMessagesCount 未读私信总数
 func (s *Store) UnreadMessagesCount(userID string) int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1807,7 +1783,7 @@ func (s *Store) UnreadMessagesCount(userID string) int {
 	return n
 }
 
-// MarkMessagesRead 把某用户发给我的所有未读私信标记为已读
+// MarkMessagesRead 标记与某人的私信已读
 func (s *Store) MarkMessagesRead(userID, peerID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1842,7 +1818,7 @@ func (s *Store) NotificationsOf(userID string) []*model.Notification {
 	out := []*model.Notification{}
 	for _, n := range s.Notifs {
 		if n.UserID == userID {
-			cp := *n // 拷贝，避免返回内部对象引发 data race
+			cp := *n // 拷贝
 			out = append(out, &cp)
 		}
 	}
@@ -1888,7 +1864,7 @@ func (s *Store) MarkRead(id, userID string) {
 
 // ---------- 举报 ----------
 
-// AddReport 提交举报（同一目标同一举报人重复举报不重复记录）
+// AddReport 提交举报（重复举报去重）
 func (s *Store) AddReport(target, targetID, reporterID, reporter, reason, title string) (*model.Report, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1907,7 +1883,7 @@ func (s *Store) AddReport(target, targetID, reporterID, reporter, reason, title 
 	return rp, nil
 }
 
-// SetReportStatus 处理举报：resolved / ignored
+// SetReportStatus 处理举报
 func (s *Store) SetReportStatus(id, status string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1926,7 +1902,7 @@ func (s *Store) AllReports() []*model.Report {
 	defer s.mu.RUnlock()
 	out := []*model.Report{}
 	for _, rp := range s.Reports {
-		cp := *rp // 拷贝，避免返回内部对象引发 data race
+		cp := *rp // 拷贝
 		out = append(out, &cp)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt > out[j].CreatedAt })
@@ -1935,7 +1911,7 @@ func (s *Store) AllReports() []*model.Report {
 
 // ---------- 草稿 ----------
 
-// SaveDraft 保存草稿：id 为空则新建，否则必须是自己名下的草稿（防越权覆盖）
+// SaveDraft 保存草稿（防越权覆盖）
 func (s *Store) SaveDraft(d *model.Draft) (*model.Draft, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -2013,7 +1989,7 @@ func (s *Store) FollowersOf(userID string) []*model.User {
 	return out
 }
 
-// NotesByTag 某标签下的已发布笔记（倒序）
+// NotesByTag 标签下的已发布笔记
 func (s *Store) NotesByTag(tag string) []*model.Note {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -2023,7 +1999,7 @@ func (s *Store) NotesByTag(tag string) []*model.Note {
 			continue
 		}
 		if author, ok := s.Users[n.AuthorID]; ok && author.Status != "active" {
-			continue // 被禁用户的笔记不再展示（临时封锁不影响内容展示）
+			continue // 被禁用户笔记不展示
 		}
 		for _, t := range n.Tags {
 			if t == tag {
@@ -2037,10 +2013,9 @@ func (s *Store) NotesByTag(tag string) []*model.Note {
 	return out
 }
 
-// ----- 智能推荐引擎 -----
-// 设计参考小红书: 标签匹配 + CES 互动分(点赞×1+收藏×1+评论×4) + 兴趣画像 + 多样性防茧房。
-
-// recoScored 带分的候选笔记（推荐/相关通用）
+// ----- 推荐 -----
+// 标签匹配 + CES 互动分 + 兴趣画像 + 多样性。
+// recoScored 带分候选笔记
 type recoScored struct {
 	n     *model.Note
 	score float64
@@ -2064,7 +2039,7 @@ func tagOverlap(a, b []string) int {
 	return n
 }
 
-// recencyScore 时间衰减分: 越新越高, 约 30 天半衰期, 范围 (0,1]
+// recencyScore 时间衰减（30 天半衰期）
 func recencyScore(createdAt int64) float64 {
 	ageDays := float64(time.Now().Unix()-createdAt) / 86400
 	if ageDays < 0 {
@@ -2073,7 +2048,7 @@ func recencyScore(createdAt int64) float64 {
 	return 1 / (1 + ageDays/30)
 }
 
-// commentCountLocked 统计某笔记评论数（调用方需持读锁）
+// commentCountLocked 评论数（持读锁）
 func (s *Store) commentCountLocked(noteID string) int {
 	n := 0
 	for _, c := range s.Commen {
@@ -2084,12 +2059,12 @@ func (s *Store) commentCountLocked(noteID string) int {
 	return n
 }
 
-// cesScoreLocked 笔记 CES 互动分（点赞×1 + 收藏×1 + 评论×4）
+// cesScoreLocked CES 互动分
 func (s *Store) cesScoreLocked(n *model.Note) float64 {
 	return float64(len(s.Likes[n.ID]) + len(s.Favs[n.ID]) + 4*s.commentCountLocked(n.ID))
 }
 
-// interestTags 根据用户互动行为构建兴趣标签画像（标签 -> 权重）。调用方需持读锁。
+// interestTags 构建兴趣画像（持读锁）
 func (s *Store) interestTags(userID string) map[string]float64 {
 	prof := map[string]float64{}
 	add := func(tags []string, w float64) {
@@ -2097,7 +2072,7 @@ func (s *Store) interestTags(userID string) map[string]float64 {
 			prof[t] += w
 		}
 	}
-	// 点赞过的笔记标签（基础兴趣信号）
+	// 点赞标签
 	for noteID, users := range s.Likes {
 		for _, u := range users {
 			if u == userID {
@@ -2108,7 +2083,7 @@ func (s *Store) interestTags(userID string) map[string]float64 {
 			}
 		}
 	}
-	// 收藏过的笔记标签（"想留着看"，强信号）
+	// 收藏标签
 	for noteID, users := range s.Favs {
 		for _, u := range users {
 			if u == userID {
@@ -2127,7 +2102,7 @@ func (s *Store) interestTags(userID string) map[string]float64 {
 			}
 		}
 	}
-	// 浏览过的笔记标签（轻量但高频的兴趣信号；带时间衰减，越旧越弱，避免陈年浏览常驻画像）
+	// 浏览标签（带时间衰减）
 	if viewed := s.ViewHist[userID]; len(viewed) > 0 {
 		for noteID, ts := range viewed {
 			if n, ok := s.Notes[noteID]; ok {
@@ -2144,7 +2119,7 @@ func (s *Store) interestTags(userID string) map[string]float64 {
 			add(n.Tags, 2)
 		}
 	}
-	// 关注的作者的笔记标签（社交兴趣扩散）
+	// 关注作者的笔记标签
 	if fids := s.Follow[userID]; len(fids) > 0 {
 		fs := make(map[string]bool, len(fids))
 		for _, fid := range fids {
@@ -2156,8 +2131,7 @@ func (s *Store) interestTags(userID string) map[string]float64 {
 			}
 		}
 	}
-	// 冷启动弱画像：真实互动为零、但注册时选了兴趣标签，用其做轻量画像
-	// （权重 0.5，低于任何真实行为，避免喧宾夺主；一旦产生真实互动即被覆盖）
+	// 冷启动：无真实互动时用注册兴趣标签（权重 0.5）
 	if len(prof) == 0 {
 		if u, ok := s.Users[userID]; ok && len(u.Interests) > 0 {
 			for _, t := range u.Interests {
@@ -2168,13 +2142,9 @@ func (s *Store) interestTags(userID string) map[string]float64 {
 	return prof
 }
 
-// cfScore 基于收藏行为的 Item-CF 协同过滤：
-// 用户「互动过」(浏览或收藏) 的笔记集合 U；凡与 U 中某篇被同一批用户收藏过的其他笔记，
-// 累加共现强度作为协同分。本质是「和我口味相似（同样收藏了某篇）的人还收藏了什么」。
-// 调用方需持读锁（内部遍历 s.Favs / s.ViewHist / s.Notes）。
-// 返回候选笔记的协同分（0 表示无可参考的相似行为）。
+// cfScore 基于收藏行为的协同过滤分（持读锁）
 func (s *Store) cfScore(userID, noteID string) float64 {
-	// 1) 该用户互动过的笔记集合
+	// 用户互动过的笔记集合
 	interacted := map[string]bool{}
 	if v := s.ViewHist[userID]; len(v) > 0 {
 		for id := range v {
@@ -2187,9 +2157,9 @@ func (s *Store) cfScore(userID, noteID string) float64 {
 		}
 	}
 	if len(interacted) == 0 {
-		return 0 // 冷启动：无行为，协同过滤无从谈起（由热度分支兜底）
+		return 0 // 冷启动：无行为，协同分 0
 	}
-	// 2) 共现累加：遍历收藏关系，找「相似用户」(与 U 中某篇同被收藏) 还收藏了哪些笔记
+	// 共现累加：相似用户还收藏了哪些笔记
 	score := 0.0
 	for aID, users := range s.Favs {
 		if !interacted[aID] {
@@ -2199,7 +2169,7 @@ func (s *Store) cfScore(userID, noteID string) float64 {
 			if bID == aID || bID == noteID {
 				continue
 			}
-			// 找与 A 的共同收藏者数量（共现强度）
+			// 共同收藏者数量（共现强度）
 			common := 0
 			for _, u := range users {
 				for _, v := range u2 {
@@ -2217,8 +2187,8 @@ func (s *Store) cfScore(userID, noteID string) float64 {
 	return score
 }
 
-// RecommendForUser 首页「为你推荐」: 基于兴趣画像 + CES + 新鲜度 + 社交关系的个性化排序。
-// 冷启动（无互动历史）自动退化为「热度 + 新鲜度」排序, 保证非空。
+// RecommendForUser 首页推荐：画像 + CES + 新鲜度 + 社交关系排序
+// 冷启动退化为热度排序
 func (s *Store) RecommendForUser(userID string, limit int) []*model.Note {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -2227,7 +2197,7 @@ func (s *Store) RecommendForUser(userID string, limit int) []*model.Note {
 	for _, fid := range s.Follow[userID] {
 		followed[fid] = true
 	}
-	disliked := s.Dislikes[userID]      // 已「不感兴趣」的笔记集合
+	disliked := s.Dislikes[userID]         // 已「不感兴趣」的笔记集合
 	dislikedTags := s.DislikedTags(userID) // 不感兴趣笔记的标签集合（同类降权）
 	cfg := s.RecoConfig
 	cands := []recoScored{}
@@ -2236,13 +2206,13 @@ func (s *Store) RecommendForUser(userID string, limit int) []*model.Note {
 			continue
 		}
 		if author, ok := s.Users[n.AuthorID]; ok && author.Status != "active" {
-			continue // 被禁用户的笔记不再展示（临时封锁不影响内容展示）
+			continue // 被禁用户笔记不展示
 		}
 		if n.Level == "black" {
-			continue // 黑标不进入「为你推荐」推送
+			continue // 黑标不进推荐
 		}
 		if disliked[n.ID] {
-			continue // 已「不感兴趣」：直接剔除
+			continue // 已不感兴趣：剔除
 		}
 		tagScore := 0.0
 		hitDislikedTag := false
@@ -2259,10 +2229,10 @@ func (s *Store) RecommendForUser(userID string, limit int) []*model.Note {
 		if followed[n.AuthorID] {
 			followBonus = 5 // 已关注作者: 社交关系加权
 		}
-		cf := s.cfScore(userID, n.ID) // 协同过滤: 相似用户也喜欢的
+		cf := s.cfScore(userID, n.ID) // 协同过滤分
 		score := tagScore*cfg.WTag + cesNorm*cfg.WCes + rec*cfg.WRec + followBonus*cfg.WFollow + cf*cfg.WCf
 		if hitDislikedTag {
-			// 命中不感兴趣标签：降权，但非硬剔除（用户仍可偶然看到同类之外的其他内容）
+			// 命中不感兴趣标签：降权不剔除
 			score -= cfg.DislikeTagPenalty * float64(len(n.Tags))
 		}
 		cp := *n
@@ -2274,7 +2244,7 @@ func (s *Store) RecommendForUser(userID string, limit int) []*model.Note {
 		}
 		return cands[i].n.CreatedAt > cands[j].n.CreatedAt
 	})
-	// 冷启动（无真实互动行为）时单标签上限更严，强制跨类目多样；否则用常规上限防茧房
+	// 冷启动单标签上限更严，保持多样性
 	maxPerTag := cfg.MaxPerTag
 	if len(prof) == 0 {
 		maxPerTag = cfg.ColdMaxPerTag
@@ -2282,7 +2252,7 @@ func (s *Store) RecommendForUser(userID string, limit int) []*model.Note {
 	return diversify(cands, limit, maxPerTag)
 }
 
-// diversify 多样性打散: 单个标签最多 maxPerTag 篇, 避免信息茧房; 不足时放宽补齐。
+// diversify 多样性打散：单标签最多 maxPerTag 篇
 func diversify(cands []recoScored, limit, maxPerTag int) []*model.Note {
 	out := []*model.Note{}
 	tagCount := map[string]int{}
@@ -2305,7 +2275,7 @@ func diversify(cands []recoScored, limit, maxPerTag int) []*model.Note {
 			tagCount[t]++
 		}
 	}
-	if len(out) < limit { // 打散导致不足, 放宽限制补齐
+	if len(out) < limit { // 打散后不足则放宽补齐
 		used := map[string]bool{}
 		for _, n := range out {
 			used[n.ID] = true
@@ -2324,8 +2294,8 @@ func diversify(cands []recoScored, limit, maxPerTag int) []*model.Note {
 	return out
 }
 
-// RelatedNotes 相关推荐（智能）: 按标签重叠度 + CES + 新鲜度 + 同频道加权排序,
-// 并做多样性打散, 避免清一色同标签。category 仅作同频道加权。
+// RelatedNotes 相关推荐：标签重叠 + CES + 新鲜度 + 多样性
+// category 仅作同频道加权。
 func (s *Store) RelatedNotes(noteID, category string, limit int) []*model.Note {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -2333,7 +2303,7 @@ func (s *Store) RelatedNotes(noteID, category string, limit int) []*model.Note {
 	if src == nil {
 		return []*model.Note{}
 	}
-	// 源笔记本身不计入; 仅已发布且作者未被禁
+	// 排除源笔记；仅已发布且作者未被禁
 	cands := []recoScored{}
 	for _, n := range s.Notes {
 		if n.ID == noteID || n.Status != "published" {
@@ -2366,10 +2336,8 @@ func (s *Store) RelatedNotes(noteID, category string, limit int) []*model.Note {
 	return diversify(cands, limit, 2)
 }
 
-// UpdateNote 作者编辑笔记（媒体保持不变）
-// UpdateNote 作者编辑笔记。编辑后强制重新进入审核流程：
-//   - status 重置为 pending（已发布笔记也会下架待审）
-//   - level 清空（需管理员重新审核定级）
+// UpdateNote 编辑笔记
+// 编辑后重新进入审核：status=pending、level 清空
 func (s *Store) UpdateNote(id, userID string, title, content string, tags []string, category, cover string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -2391,7 +2359,7 @@ func (s *Store) UpdateNote(id, userID string, title, content string, tags []stri
 	if cover != "" {
 		n.Cover = cover
 	}
-	// 编辑后重新进入待审核（重审），管理员需重新定级
+	// 编辑后重新待审核
 	n.Status = "pending"
 	n.Level = ""
 	s.saveLocked("notes.json")
@@ -2422,10 +2390,7 @@ func (s *Store) View(n *model.Note, viewerID string) model.NoteView {
 			cc++
 		}
 	}
-	// 关键：NoteView 里的视图字段（Views/Status/Level 等）必须是「最新」值。
-	// 调用方传入的 n 可能只是 NotesList/NotesByAuthor 等在持锁期间做的值拷贝（cp := *n），
-	// IncViews 在持锁期间写的是 s.Notes[id]，与 cp 不共享内存。因此这里要从 s.Notes[id]
-	// 再拷一份最新视图，避免首页 feed 累加浏览量后前端仍看到旧值。
+	// 取最新值，防返回旧浏览量
 	noteCopy := *n
 	if fresh, ok := s.Notes[n.ID]; ok {
 		noteCopy = *fresh

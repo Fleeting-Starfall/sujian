@@ -4,8 +4,7 @@ import (
 	"testing"
 )
 
-// TestViewSignalInProfile 验证浏览行为会进入兴趣画像，从而影响「为你推荐」排序：
-// 同一用户浏览某标签的笔记后，该标签的其他笔记在推荐中排得更高（或更易出现）。
+// TestViewSignalInProfile 浏览行为进入画像并影响推荐排序。
 func TestViewSignalInProfile(t *testing.T) {
 	app, cleanup := newTestApp(t)
 	defer cleanup()
@@ -66,9 +65,8 @@ func TestViewSignalInProfile(t *testing.T) {
 	baseItems, _ := baseFeed.Body["items"].([]interface{})
 	baseRankA2 := rankOf(baseItems, noteA2)
 
-	// bob 主动打开（浏览）tagA 的两篇笔记 —— 走 noteDetail 的 RecordView，
-	// 进入 ViewHist 并加权兴趣画像。注意：首页 feed 仅展示、不记浏览，
-	// 所以必须真正打开详情才会入画像（曝光≠浏览）。
+	// bob 浏览 tagA 两篇笔记（RecordView 入画像）
+	// feed 仅展示不记浏览，须打开详情才入画像
 	for _, id := range []string{noteA1, noteA2} {
 		v := app.do("GET", "/api/notes/"+id, bobTok, nil)
 		if v.Status != 200 {
@@ -80,9 +78,7 @@ func TestViewSignalInProfile(t *testing.T) {
 	afterFeed := app.do("GET", "/api/feed?sort=hot", bobTok, nil)
 	afterItems, _ := afterFeed.Body["items"].([]interface{})
 
-	// 严格断言：浏览 tagA 后，A2 必须仍在首屏，且排在同为对照的 B 类笔记（B1/B2）之前。
-	// 即画像已明确偏向 tagA，不至于把同标签内容压到无关标签内容之下。
-	// （不对比「浏览前 A2 排名」，因冷启动顺序非确定，且 A1/A2 互相竞争属正常）
+	// 断言：浏览 tagA 后 A2 排在 B 类对照之前
 	afterRankA2 := rankOf(afterItems, noteA2)
 	rankB1 := rankOf(afterItems, noteB1)
 	rankB2 := rankOf(afterItems, noteB2)
@@ -99,7 +95,7 @@ func TestViewSignalInProfile(t *testing.T) {
 		baseRankA2, afterRankA2, rankB1, rankB2)
 }
 
-// rankOf 返回笔记 id 在 feed items 中的下标（0 起），不在列表返回 -1。
+// rankOf 返回笔记 id 在 feed 中的下标
 func rankOf(items []interface{}, id string) int {
 	for i, it := range items {
 		if m, ok := it.(map[string]interface{}); ok {

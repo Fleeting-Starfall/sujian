@@ -8,9 +8,7 @@ import (
 	"sujian/internal/store"
 )
 
-// TestViewHistory 浏览历史全链路：
-// 注册→审核→admin发2篇笔记→用户浏览详情→历史记录→重复浏览去重(更新时间戳)→
-// 列表时间倒序→删除单条→清空→未登录401。
+// TestViewHistory 浏览历史：记录/去重/倒序/删除/清空/401。
 func TestViewHistory(t *testing.T) {
 	app, cleanup := newTestApp(t)
 	defer cleanup()
@@ -105,7 +103,7 @@ func TestViewHistory(t *testing.T) {
 	}
 }
 
-// historyIDs 调 /api/me/history 并返回 note id 列表（按返回顺序）
+// historyIDs 调 /api/me/history 返回 note id 列表
 func (a *testApp) historyIDs(t *testing.T, token string) []string {
 	t.Helper()
 	r := a.do("GET", "/api/me/history", token, nil)
@@ -126,7 +124,7 @@ func (a *testApp) historyIDs(t *testing.T, token string) []string {
 	return out
 }
 
-// TestViewHistoryLimit store 层上限淘汰：超过上限（200）条时自动淘汰最旧的。
+// TestViewHistoryLimit store 层上限淘汰最旧记录。
 func TestViewHistoryLimit(t *testing.T) {
 	dir := t.TempDir()
 	st := store.New(dir)

@@ -79,10 +79,7 @@ function esc(s) {
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
-// escJS 用于把用户内容安全塞进「双引号 HTML 属性内的单引号 JS 字符串」，
-// 例如 onclick="foo('ID','"+escJS(name)+"')"。
-// 关键：把 ' " \ 转成 JS 转义序列（而非 HTML 实体），否则 HTML 属性会把 &#39; 解码回 '，
-// 使攻击者昵称里的 ' 逃出 JS 字符串造成存储型 XSS。
+// escJS 把用户内容转义进 JS 字符串，防存储型 XSS
 function escJS(s) {
   return String(s == null ? '' : s)
     .replace(/\\/g, '\\\\')
@@ -327,14 +324,11 @@ function lvDotHTML(level) {
 function noteCardHTML(n) {
   const cover = n.media && n.media[0] ? n.media[0] : '';
   const sensitive = n.level === 'red' || n.level === 'black'; // 红/黑标=敏感内容，封面模糊
-  // 媒体类型判定：旧数据可能 mediaType='image' 但 src 是 mp4（如 data/notes.json 里早期发布的视频笔记），
-  // Chrome 会拒绝用 <img> 渲染 mp4 显示破图标；Safari 宽容能渲染首帧 —— 行为不一致。
-  // 统一以「文件后缀」为准：视频扩展名 → <video>，其余 → <img>，两端浏览器行为一致。
+  // 媒体类型以文件后缀为准：视频扩展名 → <video>，其余 → <img>
   const isVideo = (n.mediaType === 'video') || /\.(mp4|mov|webm|m4v)(\?|$)/i.test(cover);
   let mediaHtml;
   if (isVideo) {
-    // 视频卡片：优先用系统生成的封面图(n.cover, 发布时自动截首帧)作为 poster，
-    // 避免 preload="metadata" 在部分编码下无法显示首帧导致的"无封面"黑块。
+    // 视频卡片：用封面图作 poster，避免无封面黑块
     mediaHtml = '<video class="nc-media' + (sensitive ? ' nc-blur' : '') + '" src="' + esc(cover) + '" preload="metadata" muted playsinline' +
       (n.cover ? ' poster="' + esc(n.cover) + '"' : '') + '></video>';
   } else {
@@ -348,7 +342,7 @@ function noteCardHTML(n) {
                       n.status === 'rejected' ? '<span class="nc-badge" style="background:#fff1f0; color:#cf1322; border:1px solid #ffa39e;">未通过</span>' : '';
   return (
     '<div class="note-card" data-note-id="' + esc(n.id) + '" onclick="location.href=\'/note?id=' + esc(n.id) + '\'">' +
-    // 右上角「…」菜单：不感兴趣（静默生效，无文案）
+    // 「…」菜单：不感兴趣（静默生效）
     '<button class="nc-more" type="button" aria-label="更多" onclick="event.stopPropagation();toggleNoteMenu(event,\'' + esc(n.id) + '\')">⋯</button>' +
     '<div class="nc-menu" id="note-menu-' + esc(n.id) + '" style="display:none;" onclick="event.stopPropagation()">' +
     '<div class="nc-menu-item" onclick="dislikeNote(\'' + esc(n.id) + '\')">不感兴趣</div>' +
@@ -401,7 +395,7 @@ function dislikeNote(noteID) {
   const feed = document.getElementById('feed');
   const m = feed && feed._masonry;
 
-  // 备份一份用于撤销时放回（复位可能残留的动画样式）
+  // 备份用于撤销时放回
   const backup = card.cloneNode(true);
   backup.style.opacity = ''; backup.style.transform = ''; backup.style.transition = '';
 
@@ -412,7 +406,7 @@ function dislikeNote(noteID) {
     body: JSON.stringify({ noteID: noteID })
   });
 
-  // 淡出移除；同步从瀑布流内部卡片列表摘除，避免后续 reflow 重新插入
+  // 淡出移除并从瀑布流摘除
   card.style.transition = 'opacity .25s, transform .25s';
   card.style.opacity = '0';
   card.style.transform = 'scale(.96)';

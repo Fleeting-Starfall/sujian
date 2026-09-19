@@ -5,9 +5,7 @@ import (
 	"testing"
 )
 
-// TestChangePassword 用户自助修改密码全链路：
-// 注册 → 管理员审核通过 → 旧密码登录 → 各种非法输入被拒 → 正确修改成功 →
-// 旧会话失效（被踢）→ 新密码可登录、旧密码被拒。
+// TestChangePassword 改密全链路：改密成功、旧会话失效、旧密码被拒。
 func TestChangePassword(t *testing.T) {
 	app, cleanup := newTestApp(t)
 	defer cleanup()

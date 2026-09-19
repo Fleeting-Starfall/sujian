@@ -6,8 +6,8 @@ import (
 	"strings"
 )
 
-// hotTags 返回使用频次最高的标签 top 12，用于搜索页「热门标签」快捷入口。
-// 仅统计已发布（status=published）的笔记标签，按出现次数降序。
+// hotTags 高频标签 top 12
+// 仅统计已发布笔记的标签
 func (s *Server) hotTags(w http.ResponseWriter, r *http.Request) {
 	if s.requireLogin(w, r) == nil {
 		return

@@ -14,7 +14,7 @@ import (
 	"sujian/internal/store"
 )
 
-// testApp 封装一个进程内 Server（真实 handler + 真实 store，仅用内存临时目录，不碰项目 data/）
+// testApp 进程内 Server（真实 handler + store，内存临时目录）
 type testApp struct {
 	srv *Server
 	mux *http.ServeMux
@@ -244,7 +244,7 @@ func TestFunctionalFlows(t *testing.T) {
 	}
 }
 
-// TestNoteEditReReview 编辑笔记后强制重新审核的流程
+// TestNoteEditReReview 编辑后强制重新审核
 func TestNoteEditReReview(t *testing.T) {
 	app, cleanup := newTestApp(t)
 	defer cleanup()
@@ -345,7 +345,7 @@ func TestNoteEditReReview(t *testing.T) {
 	}
 }
 
-// TestConcurrentHandlerLoad 用 -race 在并发读写下跑真实 handler，验证并发修复
+// TestConcurrentHandlerLoad -race 并发读写
 func TestConcurrentHandlerLoad(t *testing.T) {
 	app, cleanup := newTestApp(t)
 	defer cleanup()
@@ -395,7 +395,7 @@ func hasPasswordKey(m map[string]interface{}) bool {
 	return false
 }
 
-// TestSensitiveNoteAndOfficialVerify 红标内容改为敏感内容（登录即可看）+ 官方认证流程
+// TestSensitiveNoteAndOfficialVerify 红标登录可见 + 官方认证流程
 func TestSensitiveNoteAndOfficialVerify(t *testing.T) {
 	app, cleanup := newTestApp(t)
 	defer cleanup()
@@ -530,7 +530,7 @@ func TestSensitiveNoteAndOfficialVerify(t *testing.T) {
 	}
 }
 
-// TestSessionPersistenceAndLoginIP 会话持久化（服务重启后仍保持登录）+ 登录 IP 记录
+// TestSessionPersistenceAndLoginIP 会话持久化 + 登录 IP 记录
 func TestSessionPersistenceAndLoginIP(t *testing.T) {
 	app, cleanup := newTestApp(t)
 	defer cleanup()
@@ -579,7 +579,7 @@ func TestSessionPersistenceAndLoginIP(t *testing.T) {
 	// 4) 会话持久化：token 写入磁盘后，重建 Store（模拟服务重启）仍有效
 	tok2 := app.srv.Store.CreateSession("whatever")
 	_ = tok2
-	// 从同一目录重建 store（真实重启流程：新 Store 实例从磁盘加载 sessions.json）
+	// 从同目录重建 store（模拟重启）
 	st2 := store.New(app.dir)
 	u2 := st2.UserByToken(tok)
 	if u2 == nil {

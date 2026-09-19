@@ -5,9 +5,7 @@ import (
 	"testing"
 )
 
-// TestMessageFile 私信发送图片/任意文件：
-// image/file 消息成功发送（mediaType/mediaName/mediaSize 透传）→ 对方可见 →
-// 非法输入被拒（文件无 media / 不属于当前账号）。
+// TestMessageFile 私信图片/文件：成功发送与非法输入被拒。
 func TestMessageFile(t *testing.T) {
 	app, cleanup := newTestApp(t)
 	defer cleanup()
@@ -85,9 +83,7 @@ func TestMessageFile(t *testing.T) {
 	}
 }
 
-// TestMessageVideo 私信发送视频：
-// 视频消息成功发送 → 对方能看到（mediaType/media 正确）→ 会话列表摘要 [视频] →
-// 非法输入被拒（媒体不属于当前账号 / 视频无媒体 / 文本为空）。
+// TestMessageVideo 私信视频：成功发送、摘要[视频]、非法输入被拒。
 func TestMessageVideo(t *testing.T) {
 	app, cleanup := newTestApp(t)
 	defer cleanup()
@@ -127,7 +123,7 @@ func TestMessageVideo(t *testing.T) {
 	if r := app.do("POST", "/api/messages/send", adminTok, map[string]string{"to": aliceID, "mediaType": "video"}); r.Status != 400 {
 		t.Fatalf("视频无媒体应 400，实际 %d", r.Status)
 	}
-	// 2c. 媒体不属于当前账号 → 400（路径穿越/伪造）
+	// 2c. 媒体不属于当前账号 → 400
 	if r := app.do("POST", "/api/messages/send", adminTok, map[string]interface{}{"to": aliceID, "mediaType": "video", "media": "/uploads/" + aliceID + "/evil.mp4"}); r.Status != 400 {
 		t.Fatalf("他人媒体应 400，实际 %d: %v", r.Status, r.Body)
 	}
@@ -166,7 +162,7 @@ func TestMessageVideo(t *testing.T) {
 	if r.Status != 200 {
 		t.Fatalf("alice 会话列表失败 %d", r.Status)
 	}
-	// /api/messages 返回 JSON 数组（不是对象），用 Raw 解析
+	// /api/messages 返回数组，用 Raw 解析
 	var arr []map[string]interface{}
 	if err := json.Unmarshal(r.Raw, &arr); err != nil {
 		t.Fatalf("解析会话列表失败: %v", err)

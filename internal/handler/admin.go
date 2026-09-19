@@ -55,8 +55,7 @@ func (s *Server) adminReject(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, 200, map[string]string{"message": "已拒绝"})
 }
 
-// adminBanUser 设置/解除账号临时封锁。hours>0 封锁 hours 小时（到期自动解封）；
-// hours<=0 解除封锁。封锁后该用户所有旧登录立即失效。
+// adminBanUser 设置/解除临时封锁（到期自动解封，封锁即踢出旧登录）
 func (s *Server) adminBanUser(w http.ResponseWriter, r *http.Request) {
 	if s.requireAdmin(w, r) == nil {
 		return
@@ -108,7 +107,7 @@ func (s *Server) adminNotes(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, 200, out)
 }
 
-// adminReviewNote 审核定级 / 改级：level=green|yellow|red 通过并定级
+// adminReviewNote 审核定级
 func (s *Server) adminReviewNote(w http.ResponseWriter, r *http.Request) {
 	admin := s.requireAdmin(w, r)
 	if admin == nil {
@@ -138,7 +137,7 @@ func (s *Server) adminReviewNote(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, 200, map[string]string{"message": "已通过审核"})
 }
 
-// adminRejectNote 驳回待审核笔记
+// adminRejectNote 驳回笔记
 func (s *Server) adminRejectNote(w http.ResponseWriter, r *http.Request) {
 	admin := s.requireAdmin(w, r)
 	if admin == nil {
@@ -160,7 +159,7 @@ func (s *Server) adminRejectNote(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, 200, map[string]string{"message": "已驳回"})
 }
 
-// adminBatchUsers 批量创建用户（直接 active，可统一设定官方认证）
+// adminBatchUsers 批量创建用户
 func (s *Server) adminBatchUsers(w http.ResponseWriter, r *http.Request) {
 	if s.requireAdmin(w, r) == nil {
 		return
@@ -171,7 +170,7 @@ func (s *Server) adminBatchUsers(w http.ResponseWriter, r *http.Request) {
 			Password string `json:"password"`
 			Nickname string `json:"nickname"`
 		} `json:"users"`
-		OfficialVerified bool `json:"officialVerified"` // 批量统一设置官方认证
+		OfficialVerified bool `json:"officialVerified"` // 统一设置官方认证
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		s.writeJSON(w, 400, map[string]string{"error": "请求格式错误"})
@@ -215,7 +214,7 @@ func (s *Server) adminBatchUsers(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, 200, map[string]interface{}{"created": created, "failed": failed})
 }
 
-// adminAgeVerify 设置/取消用户年龄认证（通过申请 = 设为成年；取消认证）
+// adminAgeVerify 设置/取消年龄认证
 func (s *Server) adminAgeVerify(w http.ResponseWriter, r *http.Request) {
 	if s.requireAdmin(w, r) == nil {
 		return
@@ -234,7 +233,7 @@ func (s *Server) adminAgeVerify(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, 200, map[string]bool{"ageVerified": body.AgeVerified})
 }
 
-// adminRejectAgeVerify 管理员拒绝用户的成年认证申请（用户可再次申请）
+// adminRejectAgeVerify 拒绝年龄认证申请
 func (s *Server) adminRejectAgeVerify(w http.ResponseWriter, r *http.Request) {
 	if s.requireAdmin(w, r) == nil {
 		return
@@ -246,7 +245,7 @@ func (s *Server) adminRejectAgeVerify(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, 200, map[string]string{"message": "已拒绝该认证申请"})
 }
 
-// adminAgeVerifyPending 返回已提交成年认证申请、待审核的用户
+// adminAgeVerifyPending 待审核的年龄认证申请
 func (s *Server) adminAgeVerifyPending(w http.ResponseWriter, r *http.Request) {
 	if s.requireAdmin(w, r) == nil {
 		return
@@ -254,7 +253,7 @@ func (s *Server) adminAgeVerifyPending(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, 200, s.Store.PendingAgeVerifyUsers())
 }
 
-// adminOfficialVerify 管理员通过/取消用户官方认证
+// adminOfficialVerify 通过/取消官方认证
 func (s *Server) adminOfficialVerify(w http.ResponseWriter, r *http.Request) {
 	if s.requireAdmin(w, r) == nil {
 		return
@@ -273,7 +272,7 @@ func (s *Server) adminOfficialVerify(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, 200, map[string]bool{"officialVerified": body.OfficialVerified})
 }
 
-// adminRejectOfficialVerify 管理员拒绝官方认证申请（用户可再次申请）
+// adminRejectOfficialVerify 拒绝官方认证申请
 func (s *Server) adminRejectOfficialVerify(w http.ResponseWriter, r *http.Request) {
 	if s.requireAdmin(w, r) == nil {
 		return
@@ -285,7 +284,7 @@ func (s *Server) adminRejectOfficialVerify(w http.ResponseWriter, r *http.Reques
 	s.writeJSON(w, 200, map[string]string{"message": "已拒绝该官方认证申请"})
 }
 
-// adminOfficialPending 返回已提交官方认证申请、待审核的用户（含材料）
+// adminOfficialPending 待审核的官方认证申请
 func (s *Server) adminOfficialPending(w http.ResponseWriter, r *http.Request) {
 	if s.requireAdmin(w, r) == nil {
 		return
@@ -293,9 +292,8 @@ func (s *Server) adminOfficialPending(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, 200, s.Store.PendingOfficialUsers())
 }
 
-// adminRemoveNote 管理员下架笔记（软删除，30 天宽限期内可恢复）。
-// 这里刻意**不删除**媒体文件：下架只是"暂时不可见"，恢复后笔记仍需展示原图/原视频。
-// 媒体文件的唯一清理时机是"永久删除"（adminPurgeNote / adminPurgeOldNotes）。
+// adminRemoveNote 下架笔记（软删除，30 天可恢复）
+// 不删媒体文件，恢复后仍需展示
 func (s *Server) adminRemoveNote(w http.ResponseWriter, r *http.Request) {
 	if s.requireAdmin(w, r) == nil {
 		return
@@ -308,7 +306,7 @@ func (s *Server) adminRemoveNote(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, 200, map[string]string{"message": "笔记已下架"})
 }
 
-// adminPurgeNote 永久删除笔记（管理员用：物理删除，无法恢复）
+// adminPurgeNote 永久删除笔记（不可恢复）
 func (s *Server) adminPurgeNote(w http.ResponseWriter, r *http.Request) {
 	if s.requireAdmin(w, r) == nil {
 		return
@@ -326,7 +324,7 @@ func (s *Server) adminPurgeNote(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, 200, map[string]string{"message": "已永久删除"})
 }
 
-// adminPurgeOldNotes 一键清理已下架超过 N 天的笔记（默认 30 天宽限期）
+// adminPurgeOldNotes 清理下架超 N 天的笔记
 func (s *Server) adminPurgeOldNotes(w http.ResponseWriter, r *http.Request) {
 	if s.requireAdmin(w, r) == nil {
 		return
@@ -342,14 +340,14 @@ func (s *Server) adminPurgeOldNotes(w http.ResponseWriter, r *http.Request) {
 		s.writeJSON(w, 400, map[string]string{"error": err.Error()})
 		return
 	}
-	// 笔记已物理删除，其媒体文件一并清理，避免 uploads/ 里留下孤儿文件
+	// 媒体文件一并清理，避免孤儿文件
 	for authorID, media := range mediaByAuthor {
 		s.cleanupMedia(authorID, media)
 	}
 	s.writeJSON(w, 200, map[string]interface{}{"purged": n, "days": days, "message": fmt.Sprintf("已清理 %d 篇超过 %d 天的下架笔记", n, days)})
 }
 
-// adminResetPassword 管理员重置用户密码
+// adminResetPassword 重置用户密码
 func (s *Server) adminResetPassword(w http.ResponseWriter, r *http.Request) {
 	if s.requireAdmin(w, r) == nil {
 		return
@@ -369,7 +367,7 @@ func (s *Server) adminResetPassword(w http.ResponseWriter, r *http.Request) {
 		s.writeJSON(w, 400, map[string]string{"error": err.Error()})
 		return
 	}
-	// 密码已变更：使该用户所有旧会话失效，防止旧登录态继续使用
+	// 改密后踢掉所有旧会话
 	s.Store.DeleteUserSessions(r.PathValue("id"))
 	s.writeJSON(w, 200, map[string]string{"message": "密码已重置"})
 }

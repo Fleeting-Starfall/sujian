@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # 素见 全链路回归测试
-# 用法：先启动服务（PORT=8099），再运行本脚本；需全新 data/（先清空再启动）
-# 依赖：仅标准库。通过 HTTP 断言全部 API 行为。
+# 用法：先启动服务并清空 data/，再运行本脚本
+# 依赖：仅标准库，HTTP 断言全部 API
 import base64, json, sys, urllib.request, urllib.error, urllib.parse, http.cookiejar
 
 BASE = "http://127.0.0.1:8099"
@@ -139,7 +139,7 @@ check("标签聚合含笔记", s == 200 and any(n["id"] == nid for n in r["items
 s, r = req("/api/notes/%s" % nid)
 check("详情含 related 字段", s == 200 and "related" in r and "following" in r, r)
 check("切到 alice", login("alice", "pass123"))
-# 评论需在"编辑"前进行：编辑后笔记回到待审核（pending），待审核笔记不可评论
+# 评论须在编辑前：编辑后待审核不可评论
 s, r = req("/api/notes/%s/comment" % nid, "POST", {"content": "临时评论"})
 check("alice 再发评论", s == 200, r)
 tmp_cid = r["id"]
@@ -158,8 +158,7 @@ check("越权编辑被拒", s != 200, r)
 # ============ 浏览量 / 评论删除权限 ============
 check("切到 alice", login("alice", "pass123"))
 s, r = req("/api/notes/%s" % nid)
-# 注：作者本人浏览不计入浏览量；此处全流程仅管理员在详情页浏览过一次（admin 于"标签聚合"段 GET 详情）。
-# 故期望 views >= 1 即视为"浏览量递增"生效。
+# 作者本人浏览不计入；期望 views>=1 即递增生效
 check("浏览量递增", s == 200 and r["note"]["views"] >= 1, r)
 s, r = req("/api/comments/%s" % cmt_id, "DELETE")
 check("非作者删除他人评论被拒", s != 200, r)
@@ -204,7 +203,7 @@ check("切到 alice", login("alice", "pass123"))
 s, r = req("/api/notifications")
 check("作者收到驳回通知", s == 200 and any(n["type"] == "reject" for n in r["items"]), r)
 s, r = req("/api/feed")
-# 红黄绿三色均进首页：黄标正常展示、红标登录可见（前端模糊+确认），驳回不展示
+# 红黄绿均进首页：黄标正常、红标登录可见、驳回不展示
 check("黄/红进首页，驳回不展示", s == 200 and all(n["id"] != nid4 for n in r["items"]) and any(n["id"] == nid2 for n in r["items"]) and any(n["id"] == nid3 for n in r["items"]), [n["id"] for n in r["items"]])
 s, r = req("/api/notes/%s" % nid4)
 check("作者可见自己被驳回的笔记(rejected=true)", s == 200 and r.get("rejected") is True, r)
@@ -218,7 +217,7 @@ s, r = req("/api/feed?q=%s" % "红标测试")
 check("搜索显示红标(登录用户)", s == 200 and any(n["id"] == nid3 for n in r["items"]), r)
 s, r = req("/api/user/%s/notes" % uid)
 check("主页显示红标(登录用户)", s == 200 and any(n["id"] == nid3 for n in r), r)
-# 年龄认证标记仍可设置（兼容旧字段），不影响红标浏览门槛
+# 年龄认证标记兼容旧字段，不影响红标门槛
 check("切到 admin", login("admin", "admin123"))
 check("设置年龄认证", req("/api/admin/users/%s/ageverify" % uid, "POST", {"ageVerified": True})[0] == 200)
 check("切到 alice", login("alice", "pass123"))
@@ -250,7 +249,7 @@ check("空列表被拒(admin)", s == 400, r)
 check("切到 alice", login("alice", "pass123"))
 
 # ============ 举报系统 ============
-# 注：nid 已在前文被编辑为 pending（待审核），举报接口只接受已发布笔记，故此处用黄标已发布的 nid2（作者同为 alice）
+# nid 已编辑为 pending，举报只接受已发布笔记，用黄标 nid2
 check("切到 admin", login("admin", "admin123"))
 s, r = req("/api/report/note/%s" % nid2, "POST", {"reason": "测试举报理由"})
 check("举报笔记", s == 200 and r["status"] == "pending", r)
@@ -295,7 +294,7 @@ s, r = req("/api/admin/stats")
 check("统计 users>=2 notes>=1", s == 200 and r["users"] >= 2 and r["notes"] >= 1, r)
 
 # ============ 评论点赞 ============
-# 注：同样使用已发布的黄标笔记 nid2（nid 已被编辑为 pending，不可评论）
+# 同样用已发布的黄标 nid2（nid 已 pending）
 check("切到 admin", login("admin", "admin123"))
 s, r = req("/api/notes/%s/comment" % nid2, "POST", {"content": "要被赞的评论"})
 check("admin 发评论(供点赞)", s == 200, r)
@@ -378,7 +377,7 @@ check("重置密码后功能正常", s == 200, r)
 
 # ============ 被禁用户内容隐藏 ============
 check("切到 admin", login("admin", "admin123"))
-# u2 发一篇绿标笔记（先审核通过），然后禁用 u2，验证其内容从首页/搜索/标签消失
+# 禁用 u2 后，其内容从首页/搜索/标签消失
 check("切到 u2", login("u2", "pass123"))
 s, r = req("/api/upload", "POST", multipart={"file": ("u2.png", png, "image/png")})
 u2_media = [r["path"]]
@@ -400,7 +399,7 @@ s, r = req("/api/tag/%s/notes" % "隐藏测试")
 check("被禁用户笔记从标签消失", s == 200 and all(n["id"] != u2nid for n in r["items"]), r)
 s, r = req("/api/user/%s/notes" % u2_id)
 check("被禁用户主页笔记为空", s == 200 and all(n["id"] != u2nid for n in r), r)
-# 非管理员（alice）直链访问被禁用户笔记应 404
+# 非管理员直链被禁用户笔记应 404
 check("切到 alice", login("alice", "newpass123"))
 s, r = req("/api/notes/%s" % u2nid)
 check("被禁用户笔记直链 404(非管理员)", s == 404, r)
