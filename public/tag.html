@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>标签 - 素见</title>
+<link rel="stylesheet" href="/css/colors_and_type.css">
+<link rel="stylesheet" href="/css/components.css">
+<link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+<header id="topnav" class="app-topnav"></header>
+
+<div class="container">
+  <div style="margin: var(--space-4) 0 var(--space-5);">
+    <h2 style="font-size: var(--font-size-h2); color: var(--primary-6);">#<span id="tag-name"></span></h2>
+    <div style="color: var(--color-text-3); font-size: var(--font-size-lead); margin-top: 4px;" id="tag-count"></div>
+  </div>
+  <div class="app-feed" id="feed"></div>
+</div>
+
+<script src="/js/masonry.js"></script>
+<script src="/js/app.js"></script>
+<script>
+'use strict';
+(async function init() {
+  try { await renderTopNav(); } catch (e) { location.href = '/login'; return; }
+  const tag = getQuery('t');
+  if (!tag) { location.href = '/'; return; }
+  document.getElementById('tag-name').textContent = tag;
+  try {
+    const d = await api('/api/tag/' + encodeURIComponent(tag) + '/notes');
+    document.getElementById('tag-count').textContent = '共 ' + d.total + ' 篇笔记';
+    renderFeed(document.getElementById('feed'), d.items, '该标签下还没有笔记');
+  } catch (e) {
+    document.getElementById('feed').innerHTML = '<div class="empty-state"><div class="big">' + ICON.alert + '</div>' + esc(e.message) + '</div>';
+  }
+})();
+</script>
+</body>
+</html>

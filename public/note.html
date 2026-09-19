@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>笔记 - 素见</title>
+<link rel="stylesheet" href="/css/colors_and_type.css">
+<link rel="stylesheet" href="/css/components.css">
+<link rel="stylesheet" href="/css/app.css">
+<style>
+/* lightbox */
+.lb-mask { position: fixed; inset: 0; background: rgba(0,0,0,.88); z-index: 400; display: none; align-items: center; justify-content: center; cursor: zoom-out; }
+.lb-mask.open { display: flex; }
+.lb-mask img { max-width: 92vw; max-height: 92vh; border-radius: var(--radius-sm); }
+.related-item { display: flex; gap: var(--space-3); padding: var(--space-2) 0; border-bottom: 1px solid var(--color-border-2); cursor: pointer; }
+.related-item:last-child { border-bottom: none; }
+.related-item img, .related-item video { width: 64px; height: 64px; object-fit: cover; border-radius: var(--radius-sm); background: var(--color-bg-5); flex-shrink: 0; }
+.related-item .r-info { flex: 1; min-width: 0; }
+.related-item .r-title { font-size: var(--font-size-lead); line-height: 19px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.related-item .r-meta { font-size: var(--font-size-body); color: var(--color-text-3); margin-top: 2px; }
+.cmt-reply { margin-left: 44px; padding: var(--space-3); background: var(--color-bg-4); border-radius: var(--radius-sm); margin-top: var(--space-2); }
+.cmt-reply .reply-name { color: var(--primary-6); }
+</style>
+</head>
+<body>
+<header id="topnav" class="app-topnav"></header>
+
+<div class="container">
+  <div class="detail-layout" id="detail"></div>
+</div>
+
+<!-- lightbox -->
+<div class="lb-mask" id="lb-mask" onclick="this.classList.remove('open')">
+  <img id="lb-img" src="" alt="">
+</div>
+
+<script src="/js/app.js"></script>
+<script>
+'use strict';
+const id = getQuery('id');
+let note = null, replyTarget = null, commenting = false;
+let curOrder = getQuery('order') === 'hot' ? 'hot' : 'new'; // 评论排序：最新/最热
+
+/* 内容等级徽标（红黄绿黑四圆点） */
+const LV_DOT = { green: '#2a9d5f', yellow: '#f0b429', red: '#e5484d', black: '#111418' };
+const LV_TEXT = { green: '绿标 · 首页推荐', yellow: '黄标 · 不推送首页', red: '红标 · 敏感内容', black: '黑标 · 最高敏感（仅搜索可见）' };
+function lvBadgeHTML(level) {
+  if (!level) return '';
+  const color = LV_DOT[level] || '#2a9d5f';
+  return '<span style="display:inline-flex; align-items:center; gap:5px; font-size:12px; color:' + color + '; border:1px solid ' + color + '; border-radius:999px; padding:2px 10px; font-weight:500;">' +
+    '<span style="width:8px; height:8px; border-radius:50%; background:' + color + '; display:inline-block;"></span>' + (LV_TEXT[level] || '') + '</span>';
+}
+
+function renderDetail(n, pending, rejected, sensitive) {
+  pending = !!pending;
+  rejected = !!rejected;
+  sensitive = !!sensitive;
+  const media = n.media && n.media[0] ? n.media[0] : '';
+  let mediaHtml;
+  if (n.mediaType === 'video') {
+    mediaHtml = '<div class="detail-media"><video src="' + esc(media) + '" controls playsinline' + (n.cover ? ' poster="' + esc(n.cover) + '"' : '') + '></video></div>';
+  } else {
+    mediaHtml = '<div class="detail-media">' + (n.media || []).map(m =>
+      '<img src="' + esc(m) + '" alt="" onclick="openLightbox(\'' + esc(m) + '\')" style="cursor:zoom-in;" onerror="this.style.display=\'none\';">'
+    ).join('') + '</div>';
+  }
+  const tags = (n.tags || []).map(t => '<span class="tag" onclick="location.href=\'/tag?t=' + encodeURIComponent(t) + '\'" style="cursor:pointer;">#' + esc(t) + '</span>').join('');
+  const me = window.__me;
+  const isAuthor = me && me.id === n.authorId;
+  const related = (n.related || []).map(r => {
+    const isSens = (r.level === 'red' || r.level === 'black');
+    const sensCls = r.level === 'black' ? 'nc-badge-black' : 'nc-badge-sens';
+    const sensTxt = r.level === 'black' ? '黑标·敏感' : '敏感';
+    return (
+    '<div class="related-item" onclick="location.href=\'/note?id=' + esc(r.id) + '\'">' +
+    (isSens ? '<span class="' + sensCls + '" style="position:relative; margin-right:-26px; z-index:2;">' + sensTxt + '</span>' : '') +
+    (r.mediaType === 'video' ? '<video src="' + esc(r.media[0]) + '" muted playsinline' + (r.cover ? ' poster="' + esc(r.cover) + '"' : '') + ' class="' + (isSens ? 'nc-blur' : '') + '" onerror="this.style.visibility=\'hidden\';"></video>' : '<img src="' + esc(r.media[0]) + '" loading="lazy" class="' + (isSens ? 'nc-blur' : '') + '" onerror="this.style.visibility=\'hidden\';">') +
+    '<div class="r-info"><div class="r-title">' + esc(r.title) + '</div>' +
+    '<div class="r-meta">' + esc(r.authorName) + ' · ' + r.likeCount + ' 赞</div></div></div>'
+    );
+  }).join('');
+  // 敏感内容（红/黑标）：确认前模糊封面/正文并盖提示层；黑标文案更强（最高敏感、仅搜索可见）
+  const isBlack = (n.level === 'black');
+  const sensOverlay = sensitive ?
+    '<div class="sensitive-overlay" id="sens-overlay" style="' + (isBlack ? 'background:rgba(17,20,24,.9);' : '') + '">' +
+    '<svg width="40" height="40" viewBox="0 0 16 16" fill="none" style="color:#e5484d;"><rect x="2.5" y="7" width="11" height="7" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M5 7V4.8a3 3 0 0 1 6 0V7" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="10.2" r="1" fill="currentColor"/></svg>' +
+    (isBlack
+      ? '<div style="font-size:16px; font-weight:700; margin:10px 0 4px; color:#fff;">该内容为最高敏感内容（黑标）</div>' +
+        '<div style="color:rgba(255,255,255,.85); font-size:13px; margin-bottom:16px;">此内容仅通过搜索可见，不会出现在首页或推送中。确定要打开吗？</div>'
+      : '<div style="font-size:16px; font-weight:600; margin:10px 0 4px;">该内容涉及敏感内容</div>' +
+        '<div style="color:var(--color-text-2); font-size:13px; margin-bottom:16px;">可能包含不适宜的内容，确定要打开吗？</div>') +
+    '<button class="btn btn-primary btn-md" onclick="confirmSensitive()">我已知晓，继续查看</button>' +
+    '</div>' : '';
+  document.getElementById('detail').innerHTML =
+    '<div class="detail-main' + (sensitive ? ' sensitive-blur' : '') + '">' +
+    (pending ? '<div class="panel" style="background:#fff7e6; border:1px solid #ffd591; color:#ad6800; margin-bottom:var(--space-4);">该笔记正在审核中，通过并定级后才会对其他用户可见</div>' : '') +
+    (rejected ? '<div class="panel" style="background:#fff1f0; border:1px solid #ffa39e; color:#cf1322; margin-bottom:var(--space-4);">该笔记未通过审核，已驳回（仅自己可见）。可点击下方「编辑」修改后重新提交审核。</div>' : '') +
+    '<div class="detail-media-wrap">' + mediaHtml + sensOverlay + '</div>' +
+    '<div class="detail-body">' +
+    '<div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;"><h1 style="margin:0;">' + esc(n.title) + '</h1>' + lvBadgeHTML(n.level) + '</div>' +
+    '<div style="color:var(--color-text-3); font-size:var(--font-size-body); margin: 2px 0 10px;">' + fmtNum(n.views || 0) + ' 浏览 · ' + fmtTime(n.createdAt) + '</div>' +
+    (tags ? '<div class="detail-tags">' + tags + '</div>' : '') +
+    '<div class="detail-content">' + esc(n.content) + '</div>' +
+    '<div style="margin-top:24px; padding-top:16px; border-top:1px solid var(--color-border-2);">' +
+    '  <div style="display:flex; align-items:center; gap:var(--space-2); margin-bottom:10px;">' +
+    '    <span style="font-size:var(--font-size-h4); font-weight:500;">评论</span>' +
+    '    <span style="flex:1;"></span>' +
+    '    <button class="chip' + (curOrder === 'new' ? ' active' : '') + '" style="padding:4px 12px; font-size:var(--font-size-body);" onclick="setOrder(\'new\')">最新</button>' +
+    '    <button class="chip' + (curOrder === 'hot' ? ' active' : '') + '" style="padding:4px 12px; font-size:var(--font-size-body);" onclick="setOrder(\'hot\')">最热</button>' +
+    '  </div>' +
+    (pending || rejected ? '<div style="color:var(--color-text-3); font-size:var(--font-size-lead); padding:8px 0;">审核状态下的笔记暂不开放评论</div>' :
+    '  <div id="reply-bar" style="display:none; font-size:var(--font-size-lead); color:var(--primary-6); margin-bottom:8px;">回复 @<span id="reply-name"></span> <a href="#" style="color:var(--color-text-3); font-size:var(--font-size-body);" onclick="clearReply();return false;">取消</a></div>' +
+    '  <div class="comment-box">' +
+    '    <textarea id="cmt-input" placeholder="说点什么…" maxlength="500"></textarea>' +
+    '    <button class="btn btn-primary btn-md" onclick="sendComment()">评论</button>' +
+    '  </div>') +
+    '  <div class="comment-list" id="comment-list"></div>' +
+    '</div>' +
+    '</div>' +
+    '</div>' +
+    '<div class="detail-side">' +
+    '<div class="panel">' +
+    '  <div class="author-row">' +
+    '    <a href="/profile?u=' + esc(n.authorId) + '">' + avatarHTML(n.authorName, '', 'large') + '</a>' +
+    '    <div class="author-info">' +
+    '      <div class="name"><a href="/profile?u=' + esc(n.authorId) + '">' + esc(n.authorName) + '</a></div>' +
+    '      <div class="meta">素见创作者</div>' +
+    '    </div>' +
+    (me && !isAuthor ? '<button class="btn ' + (n.following ? 'btn-outline' : 'btn-primary') + ' btn-sm" id="follow-btn">' + (n.following ? '已关注' : '+ 关注') + '</button>' : '') +
+    '  </div>' +
+    '</div>' +
+    '<div class="panel">' +
+    (pending || rejected ? '<div style="padding: var(--space-3) var(--space-4); color:var(--color-text-3); font-size:var(--font-size-lead);">审核状态下的笔记暂无互动数据</div>' :
+    '  <div class="action-bar">' +
+    '    <button class="action-btn' + (n.liked ? ' on' : '') + '" id="like-btn">' +
+    '      <svg width="17" height="17" viewBox="0 0 16 16" fill="' + (n.liked ? 'currentColor' : 'none') + '"><path d="M8 14s-5.5-3.2-5.5-7a3 3 0 0 1 5.5-1.7A3 3 0 0 1 13.5 7c0 3.8-5.5 7-5.5 7z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>' +
+    '      <span id="like-num">' + fmtNum(n.likeCount) + '</span>' +
+    '    </button>' +
+    '    <button class="action-btn' + (n.favorited ? ' on' : '') + '" id="fav-btn">' +
+    '      <svg width="17" height="17" viewBox="0 0 16 16" fill="' + (n.favorited ? 'currentColor' : 'none') + '"><path d="M8 2.5 9.8 6l4 .6-2.9 2.8.7 4L8 11.8 4.4 13.4l.7-4L2.2 6.6 6.2 6 8 2.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>' +
+    '      <span id="fav-num">' + fmtNum(n.favoriteCount) + '</span>' +
+    '    </button>' +
+    '    <button class="action-btn" id="share-btn">' +
+    '      <svg width="17" height="17" viewBox="0 0 16 16" fill="none"><path d="M10.5 4.5 6 7.2m4.5-2.7a1.6 1.6 0 1 0-1.5-1.7m1.5 1.7a1.6 1.6 0 1 1-1.5 1.7M6 7.2a1.6 1.6 0 1 1-2.6 1.9M6 7.2a1.6 1.6 0 0 0-2.6-1.9m7.1 4.5-4.5 2.7m4.5-2.7a1.6 1.6 0 1 1 1.5 1.7" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>' +
+    '    </button>' +
+    (!isAuthor ? '<button class="action-btn" id="report-btn" title="举报">' +
+    '      <svg width="17" height="17" viewBox="0 0 16 16" fill="none"><path d="M8 1.8 14 4.6v6.8L8 14.2 2 11.4V4.6L8 1.8z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 5.6v3m0 1.6v.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>' +
+    '    </button>' : '') +
+    '  </div>') +
+    (isAuthor ? '<div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">' +
+      '<button class="btn btn-text btn-sm" onclick="location.href=\'/publish?edit=' + esc(n.id) + '\'">编辑</button>' +
+      (pending || rejected ? '' : '<button class="btn btn-text btn-sm" onclick="togglePin()">' + (n.pinned ? '取消置顶' : '置顶') + '</button>') +
+      '<button class="btn btn-text btn-sm" style="color:var(--color-danger)" onclick="delNote()">删除</button>' +
+      '</div>' : '') +
+    '</div>' +
+    (related ? '<div class="panel"><h3 style="font-size: var(--font-size-h3); margin-bottom: var(--space-2);">相关推荐</h3>' + related + '</div>' : '') +
+    '</div>';
+  const lb = document.getElementById('like-btn');
+  if (lb) lb.addEventListener('click', toggleLike);
+  const fv = document.getElementById('fav-btn');
+  if (fv) fv.addEventListener('click', toggleFav);
+  const sh = document.getElementById('share-btn');
+  if (sh) sh.addEventListener('click', share);
+  const rp = document.getElementById('report-btn');
+  if (rp) rp.addEventListener('click', () => reportTarget('note', id));
+  const fb = document.getElementById('follow-btn');
+  if (fb) fb.addEventListener('click', toggleFollow);
+  renderComments(n);
+}
+
+/* 举报弹窗（笔记/评论共用） */
+async function reportTarget(kind, tid, name) {
+  const reason = await promptDialog('举报' + (name ? ' @' + name : ''), '请填写举报理由', '');
+  if (reason === null) return;
+  if (!reason) { toast('请填写举报理由', true); return; }
+  try {
+    await api('/api/report/' + kind + '/' + tid, { method: 'POST', body: { reason } });
+    toast('举报已提交，管理员会尽快处理');
+  } catch (e) { toast(e.message, true); }
+}
+
+function renderComments(n) {
+  const list = document.getElementById('comment-list');
+  if (!n.comments || n.comments.length === 0) {
+    list.innerHTML = '<div style="color:var(--color-text-3); font-size:var(--font-size-lead); padding: 8px 0;">还没有评论，来抢沙发～</div>';
+    return;
+  }
+  list.innerHTML = n.comments.map(c => {
+    const me = window.__me;
+    const canDel = me && (c.authorId === me.id || me.role === 'admin');
+    const canReport = me && c.authorId !== me.id;
+    const inner = '<div class="comment-item">' + avatarHTML(c.authorName, '', 'default') +
+      '<div class="c-body">' +
+      '<div class="c-name">' + esc(c.authorName) + '</div>' +
+      '<div class="c-text">' + (c.parentId ? '<span class="reply-name">回复 @' + esc(c.replyTo || '') + '：</span>' : '') + esc(c.content) + '</div>' +
+      '<div class="c-time">' + fmtTime(c.createdAt) +
+      '<span style="cursor:pointer; color:' + (c.liked ? 'var(--danger-5)' : 'var(--color-text-3)') + ';" onclick="toggleCommentLike(\'' + c.id + '\', this)" title="点赞">' +
+      '<svg width="12" height="12" viewBox="0 0 16 16" fill="' + (c.liked ? 'currentColor' : 'none') + '" style="vertical-align:-1px; margin:0 2px;"><path d="M8 14s-5.5-3.2-5.5-7a3 3 0 0 1 5.5-1.7A3 3 0 0 1 13.5 7c0 3.8-5.5 7-5.5 7z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg><span class="cl-num">' + (c.likeCount || 0) + '</span></span>' +
+      ' <a href="#" style="color:var(--primary-6);" onclick="setReply(\'' + c.id + '\',\'' + escJS(c.authorName) + '\');return false;">回复</a>' +
+      (canReport ? ' <a href="#" style="color:var(--color-text-4);" onclick="reportTarget(\'comment\',\'' + c.id + '\',\'' + escJS(c.authorName) + '\');return false;">举报</a>' : '') +
+      (canDel ? ' <a href="#" style="color:var(--color-danger);" onclick="delComment(\'' + c.id + '\');return false;">删除</a>' : '') +
+      '</div>' +
+      '</div></div>';
+    return inner;
+  }).join('');
+}
+
+async function toggleCommentLike(cid, el) {
+  try {
+    const r = await api('/api/comments/' + cid + '/like', { method: 'POST', body: {} });
+    const svg = el.querySelector('svg');
+    svg.setAttribute('fill', r.liked ? 'currentColor' : 'none');
+    el.style.color = r.liked ? 'var(--danger-5)' : 'var(--color-text-3)';
+    el.querySelector('.cl-num').textContent = r.likeCount || 0;
+  } catch (e) { toast(e.message, true); }
+}
+
+function setReply(cid, name) {
+  replyTarget = { id: cid, name };
+  document.getElementById('reply-bar').style.display = 'block';
+  document.getElementById('reply-name').textContent = name;
+  const input = document.getElementById('cmt-input');
+  input.placeholder = '回复 @' + name;
+  input.focus();
+}
+
+function clearReply() {
+  replyTarget = null;
+  document.getElementById('reply-bar').style.display = 'none';
+  const input = document.getElementById('cmt-input');
+  if (input) input.placeholder = '说点什么…';
+}
+
+async function toggleLike() {
+  try {
+    const r = await api('/api/notes/' + id + '/like', { method: 'POST', body: {} });
+    // 直接用服务端权威计数（避免多端/多标签操作时本地 ±1 猜测导致数字漂移）
+    note.liked = r.liked; note.likeCount = r.likeCount;
+    document.getElementById('like-btn').classList.toggle('on', r.liked);
+    document.getElementById('like-btn').querySelector('svg').setAttribute('fill', r.liked ? 'currentColor' : 'none');
+    document.getElementById('like-num').textContent = fmtNum(note.likeCount);
+  } catch (e) { toast(e.message, true); }
+}
+
+async function toggleFav() {
+  try {
+    const r = await api('/api/notes/' + id + '/favorite', { method: 'POST', body: {} });
+    // 直接用服务端权威计数
+    note.favorited = r.favorited; note.favoriteCount = r.favoriteCount;
+    document.getElementById('fav-btn').classList.toggle('on', r.favorited);
+    document.getElementById('fav-btn').querySelector('svg').setAttribute('fill', r.favorited ? 'currentColor' : 'none');
+    document.getElementById('fav-num').textContent = fmtNum(note.favoriteCount);
+  } catch (e) { toast(e.message, true); }
+}
+
+async function sendComment() {
+  if (commenting) return;            // 防重复提交评论
+  const input = document.getElementById('cmt-input');
+  const text = input.value.trim();
+  if (!text) { toast('评论内容不能为空', true); return; }
+  const body = { content: text };
+  body.parentId = replyTarget ? replyTarget.id : undefined;
+  commenting = true;
+  try {
+    await api('/api/notes/' + id + '/comment', { method: 'POST', body });
+    input.value = '';
+    clearReply();
+    await reload();
+  } catch (e) { toast(e.message, true); }
+  commenting = false;
+}
+
+async function toggleFollow() {
+  try {
+    const r = await api('/api/user/' + note.authorId + '/follow', { method: 'POST', body: {} });
+    const fb = document.getElementById('follow-btn');
+    if (fb) {
+      fb.textContent = r.following ? '已关注' : '+ 关注';
+      fb.classList.toggle('btn-primary', !r.following);
+      fb.classList.toggle('btn-outline', r.following);
+    }
+    toast(r.following ? '已关注' : '已取消关注');
+  } catch (e) { toast(e.message, true); }
+}
+
+async function delNote() {
+  if (!await confirmDialog('删除笔记', '确定删除这篇笔记吗？删除后不可恢复。', '删除')) return;
+  try {
+    await api('/api/notes/' + id, { method: 'DELETE' });
+    toast('已删除');
+    setTimeout(() => location.href = '/', 900);
+  } catch (e) { toast(e.message, true); }
+}
+
+async function delComment(cid) {
+  if (!await confirmDialog('删除评论', '确定删除这条评论吗？', '删除')) return;
+  try {
+    await api('/api/comments/' + cid, { method: 'DELETE' });
+    toast('评论已删除');
+    await reload();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function share() {
+  try {
+    await navigator.clipboard.writeText(location.href);
+    toast('链接已复制，可以分享给局域网好友');
+  } catch (e) {
+    const ta = document.createElement('textarea');
+    ta.value = location.href; document.body.appendChild(ta); ta.select();
+    document.execCommand('copy'); ta.remove();
+    toast('链接已复制');
+  }
+}
+
+function openLightbox(src) {
+  document.getElementById('lb-img').src = src;
+  document.getElementById('lb-mask').classList.add('open');
+}
+// 大图预览支持 Esc 关闭
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') document.getElementById('lb-mask').classList.remove('open');
+});
+
+async function reload() {
+  const d = await api('/api/notes/' + id + '?order=' + curOrder);
+  note = d.note; note.comments = d.comments; note.following = d.following; note.related = d.related;
+  renderDetail(note, !!d.pending, !!d.rejected, !!d.sensitive);
+  autoConfirmSensitiveIfRemembered();
+}
+
+function setOrder(o) {
+  if (o === curOrder) return;
+  curOrder = o;
+  reload();
+}
+
+// 敏感内容确认：解除模糊并关闭提示层；本会话（sessionStorage）内记住已确认，刷新/重进不再重复弹确认
+function confirmSensitive() {
+  const main = document.querySelector('.detail-main.sensitive-blur');
+  if (main) main.classList.remove('sensitive-blur');
+  const ov = document.getElementById('sens-overlay');
+  if (ov) ov.remove();
+  try { sessionStorage.setItem('sens_ok_' + id, '1'); } catch (e) {}
+}
+
+// 渲染后若本会话已确认过，自动解除模糊
+function autoConfirmSensitiveIfRemembered() {
+  if (!id) return;
+  let remembered = false;
+  try { remembered = sessionStorage.getItem('sens_ok_' + id) === '1'; } catch (e) {}
+  if (remembered && document.querySelector('.detail-main.sensitive-blur')) confirmSensitive();
+}
+
+async function togglePin() {
+  try {
+    const r = await api('/api/notes/' + id + '/pin', { method: 'POST', body: { pinned: !note.pinned } });
+    note.pinned = r.pinned;
+    toast(r.pinned ? '已置顶，个人主页优先展示' : '已取消置顶');
+    renderDetail(note);
+  } catch (e) { toast(e.message, true); }
+}
+
+(async function init() {
+  try {
+    window.__me = await renderTopNav();
+  } catch (e) { location.href = '/login'; return; }
+  try {
+    await reload();
+  } catch (e) {
+    document.getElementById('detail').innerHTML = '<div class="empty-state"><div class="big">' + ICON.alert + '</div>' + esc(e.message) + '</div>';
+  }
+})();
+</script>
+</body>
+</html>

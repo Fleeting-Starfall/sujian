@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>注册 - 素见</title>
+<link rel="stylesheet" href="/css/colors_and_type.css">
+<link rel="stylesheet" href="/css/components.css">
+<link rel="stylesheet" href="/css/app.css">
+<style>
+  .interest-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+  .interest-chips .chip {
+    padding: 7px 14px; border-radius: 999px; font-size: 13px; cursor: pointer;
+    background: var(--color-bg-2, #f3f4f6); color: var(--color-text-2, #6b7280);
+    border: 1px solid transparent; user-select: none; transition: all .15s;
+  }
+  .interest-chips .chip.active {
+    background: rgba(22,100,255,.12); color: #1664ff; border-color: rgba(22,100,255,.4);
+  }
+</style>
+</head>
+<body>
+<div class="auth-page">
+  <div class="auth-card">
+    <div class="auth-logo"><span class="logo-dot"></span>素见</div>
+    <div class="auth-title">加入素见</div>
+    <div class="auth-sub">注册申请提交后，需管理员审核通过方可登录</div>
+    <form id="reg-form">
+      <div class="field">
+        <label>用户名</label>
+        <input type="text" id="username" placeholder="2-20 位，字母/数字/下划线/中文" autocomplete="username">
+      </div>
+      <div class="field">
+        <label>昵称</label>
+        <input type="text" id="nickname" placeholder="对外展示的名字（可选，默认同用户名）">
+      </div>
+      <div class="field">
+        <label>密码</label>
+        <input type="password" id="password" placeholder="至少 6 位" autocomplete="new-password">
+      </div>
+      <div class="field">
+        <label>兴趣（可选，选几个你喜欢的，推荐更准）</label>
+        <div class="interest-chips" id="interest-chips">
+          <span class="chip" data-v="摄影">摄影</span>
+          <span class="chip" data-v="美食">美食</span>
+          <span class="chip" data-v="旅行">旅行</span>
+          <span class="chip" data-v="编程">编程</span>
+          <span class="chip" data-v="穿搭">穿搭</span>
+          <span class="chip" data-v="音乐">音乐</span>
+          <span class="chip" data-v="读书">读书</span>
+          <span class="chip" data-v="健身">健身</span>
+          <span class="chip" data-v="萌宠">萌宠</span>
+          <span class="chip" data-v="影视">影视</span>
+        </div>
+      </div>
+      <button type="submit" class="btn btn-primary btn-lg" style="width:100%;" id="btn">提交注册申请</button>
+    </form>
+    <div class="auth-switch">已有账号？<a href="/login">直接登录</a></div>
+  </div>
+</div>
+<script src="/js/app.js"></script>
+<script>
+'use strict';
+document.getElementById('reg-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const btn = document.getElementById('btn');
+  const username = document.getElementById('username').value.trim();
+  const nickname = document.getElementById('nickname').value.trim();
+  const password = document.getElementById('password').value;
+  if (!username || !password) { toast('用户名和密码不能为空', true); return; }
+  // 收集选中的兴趣标签
+  const interests = Array.from(document.querySelectorAll('#interest-chips .chip.active')).map(c => c.dataset.v);
+  btn.disabled = true; btn.textContent = '提交中…';
+  try {
+    const r = await api('/api/register', { method: 'POST', body: { username, nickname, password, interests } });
+    toast(r.message || '已提交');
+    setTimeout(() => location.href = '/login', 1600);
+  } catch (err) {
+    toast(err.message, true);
+    btn.disabled = false; btn.textContent = '提交注册申请';
+  }
+});
+// 兴趣 chip 选中/取消
+document.querySelectorAll('#interest-chips .chip').forEach(c => {
+  c.addEventListener('click', () => c.classList.toggle('active'));
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>管理后台 - 素见</title>
+<link rel="stylesheet" href="/css/colors_and_type.css">
+<link rel="stylesheet" href="/css/components.css">
+<link rel="stylesheet" href="/css/app.css">
+<style>
+.admin-content .table-toolbar { align-items: center; }
+.sec-desc { color: var(--color-text-3); font-size: var(--font-size-lead); margin: -12px 0 var(--space-5); }
+.mini-stat { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px,1fr)); gap: var(--space-4); margin-top: var(--space-4); }
+/* 内容等级圆点 */
+.lv-dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin:0 4px 0 2px; vertical-align:middle; }
+.lv-green  { background:#2a9d5f; }
+.lv-yellow { background:#f0b429; }
+.lv-red    { background:#e5484d; }
+.lv-black  { background:#111418; }
+.lv-btn { display:inline-flex; align-items:center; gap:4px; margin-right:6px; }
+/* 批量建号 */
+.batch-box { background: var(--color-bg-white); border:1px solid var(--color-border-2); border-radius: var(--radius-lg); padding: var(--space-5); margin-bottom: var(--space-5); }
+.batch-box textarea { width:100%; min-height:96px; border:1px solid var(--color-border-3); border-radius: var(--radius-md); padding:10px 12px; font-size: var(--font-size-lead); font-family: inherit; resize:vertical; outline:none; }
+.batch-box textarea:focus { border-color: var(--primary-6); }
+.batch-check { display:flex; align-items:center; gap:8px; margin:12px 0; font-size: var(--font-size-lead); color: var(--color-text-2); }
+.batch-check input { width:16px; height:16px; accent-color: var(--primary-6); }
+</style>
+</head>
+<body>
+<header id="topnav" class="app-topnav"></header>
+
+<div class="admin-layout">
+  <aside class="sidenav" style="justify-content:flex-start;">
+    <div class="sidenav-header">
+      <span class="product-icon" style="width:22px;height:22px;border-radius:6px;background:var(--primary-6);display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:13px;font-weight:700;">素</span>
+      <span class="product-name" style="font-weight:600;font-size:14px;">素见管理台</span>
+    </div>
+    <div class="sidenav-menu">
+      <div class="menu-section">
+        <div class="group-title">运营</div>
+        <div class="menu-item active" data-sec="overview">
+          <span class="menu-icon" role="img"><svg width="18" height="18" viewBox="0 0 16 16" fill="none"><rect x="1.8" y="1.8" width="12.4" height="12.4" rx="2" stroke="currentColor" stroke-width="1.4"/><path d="M4.5 10.5 6.8 8l1.8 1.6 2.9-3.1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <span class="menu-text">概览</span>
+        </div>
+        <div class="menu-item" data-sec="approval">
+          <span class="menu-icon" role="img"><svg width="18" height="18" viewBox="0 0 16 16" fill="none"><path d="M8 2 14 4.5v4.1c0 3.4-2.6 5.6-6 6-3.4-.4-6-2.6-6-6V4.5L8 2z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="m5.6 8.2 1.6 1.6 3-3.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <span class="menu-text">用户审核</span>
+        </div>
+        <div class="menu-item" data-sec="review">
+          <span class="menu-icon" role="img"><svg width="18" height="18" viewBox="0 0 16 16" fill="none"><path d="M8 1.8 13.2 4v4.2c0 3.4-2.3 5.5-5.2 6-2.9-.5-5.2-2.6-5.2-6V4L8 1.8z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M5.6 8.2 7.2 9.8l3.2-3.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <span class="menu-text">内容审核</span>
+        </div>
+        <div class="menu-item" data-sec="users">
+          <span class="menu-icon" role="img"><svg width="18" height="18" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="5.2" r="2.6" stroke="currentColor" stroke-width="1.4"/><path d="M2.8 13.5c.5-2.8 2.8-4 5.2-4s4.7 1.2 5.2 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></span>
+          <span class="menu-text">用户管理</span>
+        </div>
+        <div class="menu-item" data-sec="notes">
+          <span class="menu-icon" role="img"><svg width="18" height="18" viewBox="0 0 16 16" fill="none"><rect x="2.4" y="2.4" width="11.2" height="11.2" rx="2" stroke="currentColor" stroke-width="1.4"/><path d="M6 5.2h4M6 8h4M6 10.8h2.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></span>
+          <span class="menu-text">笔记管理</span>
+        </div>
+        <div class="menu-item" data-sec="comments">
+          <span class="menu-icon" role="img"><svg width="18" height="18" viewBox="0 0 16 16" fill="none"><path d="M2.8 3.4h10.4v7.2H6.6L3.6 13.4V10.6H2.8V3.4z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></span>
+          <span class="menu-text">评论管理</span>
+        </div>
+        <div class="menu-item" data-sec="reports">
+          <span class="menu-icon" role="img"><svg width="18" height="18" viewBox="0 0 16 16" fill="none"><path d="M8 1.8 14 4.6v6.8L8 14.2 2 11.4V4.6L8 1.8z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 5.6v3m0 1.6v.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></span>
+          <span class="menu-text">举报管理</span>
+        </div>
+      </div>
+      <div class="menu-section" style="margin-top:8px;">
+        <div class="group-title">其他</div>
+        <a class="menu-item" href="/">
+          <span class="menu-icon" role="img"><svg width="18" height="18" viewBox="0 0 16 16" fill="none"><path d="M8 13.5V8m0 0L5.8 10.2M8 8l2.2 2.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 6.5 8 2.5l5 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <span class="menu-text">返回首页</span>
+        </a>
+        <a class="menu-item" href="#" onclick="doLogout();return false;">
+          <span class="menu-icon" role="img"><svg width="18" height="18" viewBox="0 0 16 16" fill="none"><path d="M6 2.8H3.6a1 1 0 0 0-1 1v8.4a1 1 0 0 0 1 1H6M10.2 5.2 13 8l-2.8 2.8M13 8H6.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          <span class="menu-text">退出登录</span>
+        </a>
+      </div>
+    </div>
+  </aside>
+
+  <main class="admin-content">
+    <!-- 概览 -->
+    <section id="sec-overview" class="active">
+      <div class="sec-title">概览</div>
+      <div class="stat-grid" id="stat-grid"></div>
+      <div class="sec-title" style="font-size: var(--font-size-h3);">最新注册申请</div>
+      <div id="quick-pending"></div>
+    </section>
+
+    <!-- 用户审核 -->
+    <section id="sec-approval">
+      <div class="sec-title">用户审核</div>
+      <p class="sec-desc">新用户注册后需在此通过审核才能登录</p>
+      <div id="approval-body"></div>
+    </section>
+
+    <!-- 内容审核 -->
+    <section id="sec-review">
+      <div class="sec-title">内容审核</div>
+      <p class="sec-desc">笔记发布后需审核定级：<span class="lv-dot lv-green"></span>绿=首页推送 · <span class="lv-dot lv-yellow"></span>黄=自由浏览不进首页 · <span class="lv-dot lv-red"></span>红=敏感内容（浏览前需确认） · <span class="lv-dot lv-black"></span>黑=最高敏感（仅搜索可见，不进首页/推送）</p>
+      <div class="table-toolbar" id="review-filter">
+        <button class="chip active" data-f="pending">待审核</button>
+        <button class="chip" data-f="published">已通过</button>
+        <button class="chip" data-f="rejected">已驳回</button>
+        <button class="chip" data-f="removed">已下架</button>
+      </div>
+      <div id="review-body"></div>
+    </section>
+
+    <!-- 用户管理 -->
+    <section id="sec-users">
+      <div class="sec-title">用户管理</div>
+      <div id="users-body"></div>
+    </section>
+
+    <!-- 笔记管理 -->
+    <section id="sec-notes">
+      <div class="sec-title">笔记管理</div>
+      <div class="table-toolbar" id="note-filter">
+        <button class="chip active" data-f="all">全部</button>
+        <button class="chip" data-f="published">已发布</button>
+        <button class="chip" data-f="removed">已下架</button>
+        <span style="margin-left:auto;"></span>
+        <button class="btn btn-outline btn-sm" onclick="purgeOldNotes()">清理旧下架</button>
+      </div>
+      <div id="notes-body"></div>
+    </section>
+
+    <!-- 评论管理 -->
+    <section id="sec-comments">
+      <div class="sec-title">评论管理</div>
+      <div id="comments-body"></div>
+    </section>
+
+    <!-- 举报管理 -->
+    <section id="sec-reports">
+      <div class="sec-title">举报管理</div>
+      <p class="sec-desc">用户举报的笔记/评论，可查看详情、忽略或删除被举报内容</p>
+      <div id="reports-body"></div>
+    </section>
+  </main>
+</div>
+
+<script src="/js/app.js"></script>
+<script>
+'use strict';
+
+/* ---------- 导航 ---------- */
+document.querySelectorAll('.sidenav .menu-item').forEach(item => {
+  item.addEventListener('click', () => {
+    document.querySelectorAll('.sidenav .menu-item').forEach(x => x.classList.remove('active'));
+    item.classList.add('active');
+    const sec = item.dataset.sec;
+    document.querySelectorAll('.admin-content section').forEach(s => s.classList.remove('active'));
+    document.getElementById('sec-' + sec).classList.add('active');
+    if (sec !== 'overview') loadSection(sec);
+  });
+});
+
+async function loadSection(name) {
+  if (name === 'approval') renderApproval();
+  else if (name === 'review') renderReview();
+  else if (name === 'users') renderUsers();
+  else if (name === 'notes') renderNotes();
+  else if (name === 'comments') renderComments();
+  else if (name === 'reports') renderReports();
+}
+
+/* ---------- 工具 ---------- */
+const statusTag = (s) => {
+  if (s === 'pending') return '<span class="status-tag status-tag-warning">待审核</span>';
+  if (s === 'active') return '<span class="status-tag status-tag-success">已通过</span>';
+  if (s === 'rejected') return '<span class="status-tag status-tag-error">已拒绝</span>';
+  if (s === 'published') return '<span class="status-tag status-tag-success">已发布</span>';
+  if (s === 'removed') return '<span class="status-tag status-tag-stop">已下架</span>';
+  return s;
+};
+
+async function act(path, msg, reloadFn) {
+  try {
+    await api(path, { method: 'POST', body: {} });
+    toast(msg);
+    await Promise.all([loadOverview(), reloadFn()]);
+  } catch (e) { toast(e.message, true); }
+}
+
+/* ---------- 概览 ---------- */
+let stats = {};
+async function loadOverview() {
+  stats = await api('/api/admin/stats');
+  let av = [];
+  try { av = await api('/api/admin/users/official-pending'); } catch (e) {}
+  document.getElementById('stat-grid').innerHTML =
+    statCard('用户总数', stats.users) +
+    statCard('待审核用户', stats.pending, 'var(--color-warning)') +
+    statCard('待审核认证', av.length, '#1664FF') +
+    statCard('待审核笔记', stats.pendingNotes || 0, 'var(--color-warning)') +
+    statCard('绿标内容', stats.green || 0, '#2a9d5f') +
+    statCard('黄标内容', stats.yellow || 0, '#f0b429') +
+    statCard('红标内容', stats.red || 0, '#e5484d') +
+    statCard('黑标内容', stats.black || 0, '#111418') +
+    statCard('评论数', stats.comments) +
+    statCard('点赞数', stats.likes);
+  const pend = await api('/api/admin/pending');
+  if (pend.length === 0 && av.length === 0) {
+    document.getElementById('quick-pending').innerHTML = '<div class="panel" style="color:var(--color-text-3);">暂无待审核申请</div>';
+  } else {
+    let rows = pend.map(u => '<tr><td>' + esc(u.username) + '</td><td>' + esc(u.nickname) + '</td><td>注册审核</td><td>' + fmtTime(u.createdAt) + '</td><td>' +
+      '<button class="btn btn-text btn-sm" style="color:var(--color-success)" onclick="approve(\'' + u.id + '\')">通过</button>' +
+      '<button class="btn btn-text btn-sm" style="color:var(--color-danger)" onclick="reject(\'' + u.id + '\')">拒绝</button></td></tr>').join('');
+    rows += av.map(u => '<tr><td>' + esc(u.username) + '</td><td>' + esc(u.nickname) + '</td><td><span style="color:#1664FF;">官方认证</span></td><td>' + fmtTime(u.createdAt) + '</td><td>' +
+      '<button class="btn btn-text btn-sm" style="color:var(--color-success)" onclick="officialVerify(\'' + u.id + '\',true)">通过认证</button>' +
+      '<button class="btn btn-text btn-sm" style="color:var(--color-danger)" onclick="rejectOfficial(\'' + u.id + '\')">拒绝</button></td></tr>').join('');
+    document.getElementById('quick-pending').innerHTML = '<div class="panel"><table class="table"><thead><tr><th>用户名</th><th>昵称</th><th>类型</th><th>申请时间</th><th>操作</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+  }
+}
+function statCard(label, num, color) {
+  return '<div class="stat-card"><div class="num" style="' + (color ? 'color:' + color + ';' : '') + '">' + num + '</div><div class="lbl">' + label + '</div></div>';
+}
+
+/* ---------- 用户审核 ---------- */
+async function renderApproval() {
+  const pend = await api('/api/admin/pending');
+  const body = document.getElementById('approval-body');
+  if (pend.length === 0) { body.innerHTML = '<div class="panel" style="color:var(--color-text-3);">暂无待审核申请</div>'; return; }
+  body.innerHTML = '<div class="panel"><table class="table"><thead><tr><th>用户名</th><th>昵称</th><th>申请时间</th><th>操作</th></tr></thead><tbody>' +
+    pend.map(u => '<tr><td>' + esc(u.username) + '</td><td>' + esc(u.nickname) + '</td><td>' + fmtTime(u.createdAt) + '</td><td>' +
+      '<button class="btn btn-sm btn-primary" style="margin-right:8px;" onclick="approve(\'' + u.id + '\')">通过</button>' +
+      '<button class="btn btn-sm btn-outline" style="color:var(--color-danger);" onclick="reject(\'' + u.id + '\')">拒绝</button></td></tr>').join('') +
+    '</tbody></table></div>';
+}
+window.approve = id => act('/api/admin/users/' + id + '/approve', '已通过该用户', renderApproval);
+window.reject = id => act('/api/admin/users/' + id + '/reject', '已拒绝该用户', renderApproval);
+
+/* ---------- 内容审核 ---------- */
+let reviewFilter = 'pending';
+document.querySelectorAll('#review-filter .chip').forEach(chip => chip.addEventListener('click', () => {
+  document.querySelectorAll('#review-filter .chip').forEach(c => c.classList.remove('active'));
+  chip.classList.add('active');
+  reviewFilter = chip.dataset.f;
+  renderReview();
+}));
+
+const LV_LABEL = { green: '绿标', yellow: '黄标', red: '红标', black: '黑标' };
+const LV_DOT = { green: 'lv-green', yellow: 'lv-yellow', red: 'lv-red', black: 'lv-black' };
+
+function lvTag(level) {
+  if (!level) return '<span style="color:var(--color-text-4);">—</span>';
+  return '<span class="lv-dot ' + LV_DOT[level] + '"></span>' + LV_LABEL[level];
+}
+
+async function renderReview() {
+  const notes = await api('/api/admin/notes');
+  const list = notes.filter(n => n.status === reviewFilter);
+  const body = document.getElementById('review-body');
+  if (list.length === 0) { body.innerHTML = '<div class="panel" style="color:var(--color-text-3);">暂无数据</div>'; return; }
+  body.innerHTML = '<div class="panel"><table class="table"><thead><tr><th>标题</th><th>作者</th><th>频道</th><th>类型</th><th>状态</th><th>等级</th><th>发布时间</th><th>操作</th></tr></thead><tbody>' +
+    list.map(n => {
+      let ops = '';
+      if (n.status === 'pending') {
+        ops = '<button class="btn btn-sm btn-outline lv-btn" style="color:#2a9d5f;" onclick="review(\'' + n.id + '\',\'green\')"><span class="lv-dot lv-green"></span>通过</button>' +
+              '<button class="btn btn-sm btn-outline lv-btn" style="color:#b78a1a;" onclick="review(\'' + n.id + '\',\'yellow\')"><span class="lv-dot lv-yellow"></span>通过</button>' +
+              '<button class="btn btn-sm btn-outline lv-btn" style="color:#e5484d;" onclick="review(\'' + n.id + '\',\'red\')"><span class="lv-dot lv-red"></span>通过</button>' +
+              '<button class="btn btn-sm btn-outline lv-btn" style="color:#111418; border-color:#111418;" onclick="review(\'' + n.id + '\',\'black\')"><span class="lv-dot lv-black"></span>通过</button>' +
+              '<button class="btn btn-sm btn-text" style="color:var(--color-danger);" onclick="rejectNote(\'' + n.id + '\')">驳回</button>';
+      } else if (n.status === 'published') {
+        ops = '<button class="btn btn-sm btn-text lv-btn" style="color:#2a9d5f;" onclick="review(\'' + n.id + '\',\'green\')"><span class="lv-dot lv-green"></span>绿</button>' +
+              '<button class="btn btn-sm btn-text lv-btn" style="color:#b78a1a;" onclick="review(\'' + n.id + '\',\'yellow\')"><span class="lv-dot lv-yellow"></span>黄</button>' +
+              '<button class="btn btn-sm btn-text lv-btn" style="color:#e5484d;" onclick="review(\'' + n.id + '\',\'red\')"><span class="lv-dot lv-red"></span>红</button>' +
+              '<button class="btn btn-sm btn-text lv-btn" style="color:#111418;" onclick="review(\'' + n.id + '\',\'black\')"><span class="lv-dot lv-black"></span>黑</button>' +
+              '<button class="btn btn-sm btn-text" style="color:var(--color-danger);" onclick="removeNote(\'' + n.id + '\')">下架</button>';
+      } else if (n.status === 'rejected') {
+        ops = '<button class="btn btn-sm btn-text" style="color:var(--color-text-4);" onclick="removeNote(\'' + n.id + '\')">删除</button>';
+      } else {
+        ops = '<span style="color:var(--color-text-4);">—</span>';
+      }
+      return '<tr><td style="max-width:240px; overflow:hidden; text-overflow:ellipsis;">' + esc(n.title) + '</td><td>' + esc(n.authorName) + '</td><td>' + esc(n.category) + '</td><td>' + (n.mediaType === 'video' ? '视频' : '图文') + '</td><td>' + statusTag(n.status) + '</td><td>' + lvTag(n.level) + '</td><td>' + fmtTime(n.createdAt) + '</td><td>' + ops + '</td></tr>';
+    }).join('') +
+    '</tbody></table></div>';
+}
+window.review = async (id, level) => {
+  try {
+    await api('/api/admin/notes/' + id + '/review', { method: 'POST', body: { level } });
+    toast('已通过审核（' + LV_LABEL[level] + '）');
+    await Promise.all([loadOverview(), renderReview()]);
+  } catch (e) { toast(e.message, true); }
+};
+window.rejectNote = id => act('/api/admin/notes/' + id + '/reject', '已驳回该笔记', renderReview);
+
+/* ---------- 用户管理 ---------- */
+async function renderUsers() {
+  const users = await api('/api/admin/users');
+  const body = document.getElementById('users-body');
+  body.innerHTML =
+    '<div class="batch-box">' +
+    '  <div style="font-weight:600; margin-bottom:8px;">批量创建用户</div>' +
+    '  <div style="font-size:var(--font-size-lead); color:var(--color-text-3); margin-bottom:8px;">每行一个用户，格式：用户名 密码 昵称（昵称可省略，密码至少 6 位）</div>' +
+    '  <textarea id="batch-input" placeholder="zhangsan 123456 张三&#10;lisi 123456 李四"></textarea>' +
+    '  <label class="batch-check"><input type="checkbox" id="batch-age"> 创建的用户统一设为「官方认证」，直接展示官方标识</label>' +
+    '  <button class="btn btn-primary btn-md" onclick="batchCreate()">批量创建</button>' +
+    '  <div id="batch-result" style="margin-top:12px;"></div>' +
+    '</div>' +
+    '<div class="panel"><table class="table"><thead><tr><th>用户名</th><th>昵称</th><th>用户号</th><th>密码</th><th>角色</th><th>状态</th><th>官方认证</th><th>最近登录</th><th>注册时间</th><th>操作</th></tr></thead><tbody>' +
+    users.map(u => {
+      const banned = (u.bannedUntil || 0) > Math.floor(Date.now() / 1000); // 未到期的封锁视为生效中
+      return '<tr><td>' + esc(u.username) + '</td><td>' + esc(u.nickname) + '</td><td style="font-family:monospace;">' + esc(u.uid || '') + '</td><td style="font-family:monospace;">' +
+        (u.passwordPlain ? '<span style="color:var(--color-text-3); cursor:pointer;" title="点击复制" onclick="navigator.clipboard&&navigator.clipboard.writeText(\'' + escJS(u.passwordPlain) + '\')">' + esc(u.passwordPlain) + '</span>' : '<span style="color:var(--color-text-4);" title="该用户密码为加密存储的历史数据，重置密码后可查看">—</span>') + '</td><td>' + (u.role === 'admin' ? '管理员' : '普通用户') + '</td><td>' + statusTag(u.status) +
+        (banned ? '<br><span style="color:var(--color-danger);font-size:12px;">🔒 封锁至 ' + fmtTime(u.bannedUntil) + '</span>' : '') + '</td><td>' +
+        (u.officialVerified ? '<span class="lv-dot lv-green"></span>已认证' : (u.officialPending ? '<span class="lv-dot lv-yellow"></span>待审核' : '<span class="lv-dot lv-red"></span>未认证')) + '</td><td style="font-family:monospace; font-size:12px;">' + (u.lastLoginIP ? esc(u.lastLoginIP) + (u.lastLoginAt ? '<br><span style="color:var(--color-text-4);">' + fmtTime(u.lastLoginAt) + '</span>' : '') : '<span style="color:var(--color-text-4);">从未登录</span>') + '</td><td>' + fmtTime(u.createdAt) + '</td><td>' +
+        (u.role !== 'admin' ?
+        '<button class="btn btn-text btn-sm" onclick="resetPw(\'' + u.id + '\')">重置密码</button> ' +
+        '<button class="btn btn-text btn-sm" style="color:var(--color-danger);" onclick="resetPw000(\'' + u.id + '\',\'' + esc(u.username) + '\')">重置为 000000</button> ' +
+        (banned ?
+          '<button class="btn btn-text btn-sm" style="color:var(--color-success);" onclick="unbanUser(\'' + u.id + '\',\'' + esc(u.username) + '\')">解封</button> ' :
+          '<button class="btn btn-text btn-sm" style="color:var(--color-warning);" onclick="banUser(\'' + u.id + '\',\'' + esc(u.username) + '\')">封锁</button> ') +
+        (u.officialPending ?
+          '<button class="btn btn-text btn-sm" title="' + esc(u.officialMaterial || '') + '" style="color:#1664FF; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' + esc((u.officialMaterial || '查看材料').slice(0, 8)) + '</button> ' +
+          '<button class="btn btn-text btn-sm" style="color:var(--color-success);" onclick="officialVerify(\'' + u.id + '\',true)">通过认证</button> ' +
+          '<button class="btn btn-text btn-sm" style="color:var(--color-danger);" onclick="rejectOfficial(\'' + u.id + '\')">拒绝申请</button> '
+          : '<button class="btn btn-text btn-sm" style="color:' + (u.officialVerified ? 'var(--color-danger)' : 'var(--color-success)') + '" onclick="officialVerify(\'' + u.id + '\',' + (!u.officialVerified) + ')">' + (u.officialVerified ? '取消官方认证' : '设为官方认证') + '</button> ') +
+        (u.status !== 'active' ? '<button class="btn btn-text btn-sm" style="color:var(--color-success)" onclick="approve(\'' + u.id + '\')">通过</button> ' : '') +
+        (u.status !== 'rejected' ? '<button class="btn btn-text btn-sm" style="color:var(--color-danger)" onclick="reject(\'' + u.id + '\')">' + (u.status === 'active' ? '禁用' : '拒绝') + '</button>' : '') : '—') + '</td></tr>';
+    }).join('') +
+    '</tbody></table></div>';
+}
+
+window.officialVerify = async (id, v) => {
+  try {
+    await api('/api/admin/users/' + id + '/official', { method: 'POST', body: { officialVerified: v } });
+    toast(v ? '已通过官方认证' : '已取消官方认证');
+    renderUsers();
+  } catch (e) { toast(e.message, true); }
+};
+
+window.rejectOfficial = async id => {
+  try {
+    await api('/api/admin/users/' + id + '/official-reject', { method: 'POST', body: {} });
+    toast('已拒绝该官方认证申请');
+    renderUsers();
+  } catch (e) { toast(e.message, true); }
+};
+
+window.batchCreate = async () => {
+  const raw = document.getElementById('batch-input').value.trim();
+  if (!raw) { toast('请先填写用户列表', true); return; }
+  const officialVerified = document.getElementById('batch-age').checked;
+  const users = raw.split('\n').map(l => l.trim()).filter(Boolean).map(l => {
+    const parts = l.split(/\s+/);
+    return { username: parts[0], password: parts[1] || '', nickname: parts.slice(2).join(' ') || parts[0] };
+  });
+  const btn = event.target;
+  btn.disabled = true; btn.textContent = '创建中…';
+  try {
+    const r = await api('/api/admin/users/batch', { method: 'POST', body: { users, officialVerified } });
+    const ok = (r.created || []).map(u => '<div style="color:var(--color-success);">已创建 ' + esc(u.username) + '（用户号 ' + esc(u.uid) + '）</div>').join('');
+    const bad = (r.failed || []).map(f => '<div style="color:var(--color-danger);">失败 ' + esc(f.username || '(空)') + '：' + esc(f.error) + '</div>').join('');
+    document.getElementById('batch-result').innerHTML =
+      '<div style="font-weight:600; margin-bottom:4px;">创建成功 ' + (r.created || []).length + ' 个，失败 ' + (r.failed || []).length + ' 个</div>' +
+      ok + bad;
+    document.getElementById('batch-input').value = '';
+    await Promise.all([loadOverview(), renderUsers()]);
+  } catch (e) { toast(e.message, true); }
+  btn.disabled = false; btn.textContent = '批量创建';
+};
+
+window.resetPw = async id => {
+  const np = await promptDialog('重置密码', '请输入新密码（至少 6 位）', '');
+  if (np === null || !np) return;
+  try {
+    await api('/api/admin/users/' + id + '/reset-password', { method: 'POST', body: { newPassword: np } });
+    toast('密码已重置');
+  } catch (e) { toast(e.message, true); }
+};
+
+// 一键重置密码为 000000（固定弱密码，用于忘记密码/交接账号的应急场景）
+window.resetPw000 = async (id, name) => {
+  if (!confirm('确定将用户「' + name + '」的密码一键重置为 000000 吗？\n重置后该用户需用 000000 登录（原有登录会自动失效），请尽快告知对方并建议其修改密码。')) return;
+  try {
+    await api('/api/admin/users/' + id + '/reset-password', { method: 'POST', body: { newPassword: '000000' } });
+    toast('已将「' + name + '」密码重置为 000000，可立即用该密码登录');
+  } catch (e) { toast(e.message, true); }
+};
+
+// 封锁账号：输入小时数，到期自动解封（无需人工干预）
+window.banUser = async (id, name) => {
+  const h = await promptDialog('封锁账号「' + name + '」', '输入封锁时长（小时）：\n快捷参考：1 / 24 / 168(一周) / 720(一个月)\n输入 0 可解除封锁', '24');
+  if (h === null || h === '') return;
+  const hours = parseFloat(h);
+  if (isNaN(hours) || hours < 0) { toast('请输入有效小时数', true); return; }
+  try {
+    const r = await api('/api/admin/users/' + id + '/ban', { method: 'POST', body: { hours } });
+    toast(r.message || '操作成功');
+    renderUsers();
+  } catch (e) { toast(e.message, true); }
+};
+
+// 解除封锁（也可用 封锁时输入 0）
+window.unbanUser = async (id, name) => {
+  if (!confirm('确定解除用户「' + name + '」的封锁吗？')) return;
+  try {
+    const r = await api('/api/admin/users/' + id + '/ban', { method: 'POST', body: { hours: 0 } });
+    toast(r.message || '已解除封锁');
+    renderUsers();
+  } catch (e) { toast(e.message, true); }
+};
+
+/* ---------- 笔记管理 ---------- */
+let noteFilter = 'all';
+document.querySelectorAll('#note-filter .chip').forEach(chip => chip.addEventListener('click', () => {
+  document.querySelectorAll('#note-filter .chip').forEach(c => c.classList.remove('active'));
+  chip.classList.add('active');
+  noteFilter = chip.dataset.f;
+  renderNotes();
+}));
+
+async function renderNotes() {
+  const notes = await api('/api/admin/notes');
+  const list = noteFilter === 'all' ? notes : notes.filter(n => n.status === noteFilter);
+  const body = document.getElementById('notes-body');
+  if (list.length === 0) { body.innerHTML = '<div class="panel" style="color:var(--color-text-3);">暂无数据</div>'; return; }
+  body.innerHTML = '<div class="panel"><table class="table"><thead><tr><th>标题</th><th>作者</th><th>频道</th><th>类型</th><th>点赞</th><th>评论</th><th>状态</th><th>等级</th><th>发布时间</th><th>操作</th></tr></thead><tbody>' +
+    list.map(n => {
+      let ops = '';
+      if (n.status === 'published') {
+        ops = '<button class="btn btn-text btn-sm" style="color:var(--color-danger)" onclick="removeNote(\'' + n.id + '\')">下架</button>';
+      } else if (n.status === 'removed') {
+        ops = '<button class="btn btn-text btn-sm" style="color:var(--color-danger)" onclick="purgeNote(\'' + n.id + '\',\'' + esc(n.title) + '\')">永久删除</button>';
+      } else {
+        ops = '<span style="color:var(--color-text-4);">—</span>';
+      }
+      return '<tr><td style="max-width:260px; overflow:hidden; text-overflow:ellipsis;"><a href="/note?id=' + esc(n.id) + '" style="color:var(--primary-6);">' + esc(n.title) + '</a></td><td>' + esc(n.authorName) + '</td><td>' + esc(n.category) + '</td><td>' + (n.mediaType === 'video' ? '视频' : '图文') + '</td><td>' + n.likeCount + '</td><td>' + n.commentCount + '</td><td>' + statusTag(n.status) + '</td><td>' + lvTag(n.level) + '</td><td>' + fmtTime(n.createdAt) + '</td><td>' + ops + '</td></tr>';
+    }).join('') +
+    '</tbody></table></div>';
+}
+window.removeNote = id => act('/api/admin/notes/' + id + '/remove', '已下架该笔记', () => { renderNotes(); renderReview(); if (document.getElementById('reports-body')) renderReports(); });
+
+// 永久删除单条已下架笔记（双确认）
+window.purgeNote = async (id, title) => {
+  if (!await confirmDialog('永久删除笔记', '确定永久删除《' + title + '》吗？该操作不可恢复，将一并清理评论/点赞/收藏/通知。', '永久删除')) return;
+  try {
+    await api('/api/admin/notes/' + id + '/purge', { method: 'DELETE' });
+    toast('已永久删除');
+    renderNotes();
+    if (document.getElementById('reports-body')) renderReports();
+  } catch (e) { toast(e.message, true); }
+};
+
+// 一键清理超过 N 天的下架笔记（默认 30 天宽限期）
+window.purgeOldNotes = async () => {
+  const days = await promptDialog('清理旧下架笔记', '请输入宽限期天数（默认 30，将永久删除超过该天数未处理的下架笔记）', '30');
+  if (days === null) return;
+  const n = parseInt(days.trim(), 10);
+  if (!n || n <= 0) { toast('请输入大于 0 的整数天数', true); return; }
+  if (!await confirmDialog('确认清理', '将永久删除所有下架超过 ' + n + ' 天的笔记及其全部关联数据，该操作不可恢复。确定继续吗？', '清理')) return;
+  try {
+    const r = await api('/api/admin/notes/purge-old?days=' + n, { method: 'POST', body: {} });
+    toast(r.message || ('已清理 ' + r.purged + ' 篇'));
+    renderNotes();
+    await loadOverview();
+  } catch (e) { toast(e.message, true); }
+};
+
+/* ---------- 评论管理 ---------- */
+async function renderComments() {
+  const list = await api('/api/admin/comments');
+  const body = document.getElementById('comments-body');
+  if (list.length === 0) { body.innerHTML = '<div class="panel" style="color:var(--color-text-3);">暂无评论</div>'; return; }
+  body.innerHTML = '<div class="panel"><table class="table"><thead><tr><th>所属笔记</th><th>评论人</th><th>内容</th><th>时间</th><th>操作</th></tr></thead><tbody>' +
+    list.map(c => '<tr><td style="max-width:200px; overflow:hidden; text-overflow:ellipsis;"><a href="/note?id=' + esc(c.noteId) + '" style="color:var(--primary-6);">' + esc(c.noteTitle) + '</a></td><td>' + esc(c.authorName) + '</td><td style="max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' + esc(c.content) + '</td><td>' + fmtTime(c.createdAt) + '</td><td><button class="btn btn-text btn-sm" style="color:var(--color-danger)" onclick="delComment(\'' + c.id + '\')">删除</button></td></tr>').join('') +
+    '</tbody></table></div>';
+}
+window.delComment = id => act('/api/admin/comments/' + id + '/delete', '已删除评论', () => { renderComments(); if (document.getElementById('reports-body')) renderReports(); });
+
+/* ---------- 举报管理 ---------- */
+async function renderReports() {
+  const list = await api('/api/admin/reports');
+  const body = document.getElementById('reports-body');
+  if (list.length === 0) { body.innerHTML = '<div class="panel" style="color:var(--color-text-3);">暂无举报</div>'; return; }
+  const statusTag2 = s => s === 'pending' ? '<span class="status-tag status-tag-warning">待处理</span>' :
+    s === 'resolved' ? '<span class="status-tag status-tag-success">已处理</span>' :
+    '<span class="status-tag status-tag-stop">已忽略</span>';
+  body.innerHTML = '<div class="panel"><table class="table"><thead><tr><th>类型</th><th>被举报内容</th><th>举报人</th><th>理由</th><th>时间</th><th>状态</th><th>操作</th></tr></thead><tbody>' +
+    list.map(r => {
+      let ops = '';
+      if (r.status === 'pending') {
+        ops = (r.target === 'note'
+          ? '<button class="btn btn-text btn-sm" style="color:var(--color-danger)" onclick="removeNote(\'' + r.targetId + '\');resolveReport(\'' + r.id + '\')">删除笔记</button>'
+          : '<button class="btn btn-text btn-sm" style="color:var(--color-danger)" onclick="delComment(\'' + r.targetId + '\');resolveReport(\'' + r.id + '\')">删除评论</button>') +
+          ' <button class="btn btn-text btn-sm" style="color:var(--color-text-4);" onclick="resolveReport(\'' + r.id + '\',\'ignored\')">忽略</button>';
+      } else {
+        ops = '<span style="color:var(--color-text-4);">—</span>';
+      }
+      return '<tr><td>' + (r.target === 'note' ? '笔记' : '评论') + '</td>' +
+        '<td style="max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' +
+        (r.target === 'note' ? '<a href="/note?id=' + esc(r.targetId) + '" style="color:var(--primary-6);">' + esc(r.title) + '</a>' : esc(r.title)) + '</td>' +
+        '<td>' + esc(r.reporter) + '</td><td style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' + esc(r.reason) + '</td>' +
+        '<td>' + fmtTime(r.createdAt) + '</td><td>' + statusTag2(r.status) + '</td><td>' + ops + '</td></tr>';
+    }).join('') +
+    '</tbody></table></div>';
+}
+window.resolveReport = async (id, status) => {
+  try {
+    await api('/api/admin/reports/' + id + '/resolve', { method: 'POST', body: { status: status || 'resolved' } });
+    toast('已处理举报');
+    renderReports();
+  } catch (e) { toast(e.message, true); }
+};
+
+/* ---------- 初始化 ---------- */
+(async function init() {
+  try { await renderTopNav(); } catch (e) { location.href = '/login'; return; }
+  await loadOverview();
+})();
+</script>
+</body>
+</html>

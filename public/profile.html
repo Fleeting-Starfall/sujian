@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>个人主页 - 素见</title>
+<link rel="stylesheet" href="/css/colors_and_type.css">
+<link rel="stylesheet" href="/css/components.css">
+<link rel="stylesheet" href="/css/app.css">
+<style>
+.profile-tabs { display: flex; gap: var(--space-2); margin: var(--space-5) 0 var(--space-4); }
+.profile-tabs .chip { font-size: var(--font-size-h4); }
+/* 编辑资料 */
+.edit-mask { position: fixed; inset: 0; background: rgba(12,13,14,.4); z-index: 300; display: none; align-items: flex-start; justify-content: center; padding-top: 10vh; }
+.edit-mask.open { display: flex; }
+.edit-card { width: 420px; max-width: 92vw; background: var(--color-bg-white); border-radius: var(--radius-lg); box-shadow: var(--shadow-5); padding: var(--space-6); }
+.edit-card h3 { font-size: var(--font-size-h3); margin-bottom: var(--space-5); }
+.avatar-edit { display: flex; align-items: center; gap: var(--space-4); margin-bottom: var(--space-4); }
+.avatar-edit .avatar-btn { cursor: pointer; }
+/* 浏览历史列表 */
+.hist-bar { display: flex; justify-content: space-between; align-items: center; margin: var(--space-4) 0 var(--space-3); }
+.hist-bar .hint { color: var(--color-text-3); font-size: var(--font-size-body); }
+.hist-list { display: flex; flex-direction: column; gap: var(--space-3); }
+.hist-item { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-3); border: 1px solid var(--color-border-3); border-radius: var(--radius-md); cursor: pointer; transition: background .15s ease; }
+.hist-item:hover { background: var(--color-bg-2); }
+.hist-cover { width: 72px; height: 72px; object-fit: cover; border-radius: var(--radius-sm); flex-shrink: 0; background: var(--color-bg-2); }
+.hist-info { flex: 1; min-width: 0; }
+.hist-title { font-size: var(--font-size-h4); color: var(--color-text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hist-meta { font-size: var(--font-size-body); color: var(--color-text-3); margin-top: 4px; }
+.hist-del { flex-shrink: 0; width: 30px; height: 30px; border: none; border-radius: 50%; background: transparent; color: var(--color-text-3); font-size: 18px; line-height: 1; cursor: pointer; }
+.hist-del:hover { background: rgba(229,72,77,.1); color: var(--color-danger); }
+.hist-empty { color: var(--color-text-3); font-size: var(--font-size-lead); padding: var(--space-6) 0; text-align: center; }
+</style>
+</head>
+<body>
+<header id="topnav" class="app-topnav"></header>
+
+<div class="container">
+  <div class="profile-header" id="profile-header"></div>
+  <div class="profile-tabs" id="profile-tabs" style="display:none;">
+    <button class="chip active" data-tab="notes">笔记</button>
+    <button class="chip" data-tab="favs">收藏</button>
+    <button class="chip" data-tab="history">历史</button>
+  </div>
+  <div class="app-feed" id="feed"></div>
+</div>
+
+<!-- 编辑资料 -->
+<div class="edit-mask" id="edit-mask">
+  <div class="edit-card">
+    <h3>编辑资料</h3>
+    <div class="avatar-edit">
+      <div class="avatar-btn" onclick="document.getElementById('avatar-input').click()" id="avatar-preview"></div>
+      <div>
+        <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('avatar-input').click()">更换头像</button>
+        <div class="hint" style="color:var(--color-text-3); font-size:var(--font-size-body); margin-top:4px;">支持 jpg/png，≤ 10MB</div>
+      </div>
+      <input type="file" id="avatar-input" accept="image/*" style="display:none">
+    </div>
+    <div class="field">
+      <label>昵称</label>
+      <input type="text" id="edit-nickname" maxlength="24">
+    </div>
+    <div class="field">
+      <label>简介</label>
+      <textarea id="edit-bio" rows="3" maxlength="120" placeholder="介绍一下自己…"></textarea>
+    </div>
+    <div style="display:flex; gap:var(--space-3); justify-content:flex-end;">
+      <button class="btn btn-outline btn-md" onclick="closeEdit()">取消</button>
+      <button class="btn btn-primary btn-md" onclick="saveEdit()">保存</button>
+    </div>
+  </div>
+</div>
+
+<script src="/js/masonry.js"></script>
+<script src="/js/app.js"></script>
+<script>
+'use strict';
+let uid = getQuery('u');
+let me = null, user = null, counts = null, following = false, relation = 'none', newAvatarPath = null;
+
+function renderHeader() {
+  const isSelf = me && me.id === user.id;
+  document.getElementById('profile-header').innerHTML =
+    avatarHTML(user.nickname, user.avatar, 'large') +
+    '<div class="ph-info">' +
+    '<div class="name">' + esc(user.nickname) + (user.role === 'admin' ? ' <span class="status-tag status-tag-processing status-tag-text" style="font-size:12px;">管理员</span>' : '') +
+    (user.officialVerified ? ' <span style="display:inline-flex; align-items:center; gap:4px; font-size:12px; color:#1664FF; border:1px solid #1664FF; border-radius:999px; padding:1px 8px; vertical-align:2px;"><span style="width:6px;height:6px;border-radius:50%;background:#1664FF;display:inline-block;"></span>官方认证</span>'
+      : (user.officialPending ? ' <span style="display:inline-flex; align-items:center; gap:4px; font-size:12px; color:#d97706; border:1px solid #d97706; border-radius:999px; padding:1px 8px; vertical-align:2px;"><span style="width:6px;height:6px;border-radius:50%;background:#d97706;display:inline-block;"></span>官方认证审核中</span>'
+        : (user.officialRejected ? ' <span style="display:inline-flex; align-items:center; gap:4px; font-size:12px; color:var(--color-danger); border:1px solid var(--color-danger); border-radius:999px; padding:1px 8px; vertical-align:2px;"><span style="width:6px;height:6px;border-radius:50%;background:var(--color-danger);display:inline-block;"></span>官方认证未通过</span>'
+          : ''))) + '</div>' +
+    '<div class="bio">' + (user.bio || '这个人很懒，什么都没写～') + '</div>' +
+    '<div class="meta" style="color:var(--color-text-3); font-size:var(--font-size-body); margin-top:4px;">@' + esc(user.username) + ' · 用户号 <b class="fr-uid" style="color:var(--primary-6); letter-spacing:1px;">' + esc(user.uid || '—') + '</b> <a href="#" style="color:var(--primary-6);" onclick="copyUid();return false;">复制</a> · ' + fmtTime(user.createdAt) + ' 加入</div>' +
+    (isSelf && user.passwordPlain ? '<div class="meta" style="color:var(--color-text-3); font-size:var(--font-size-body); margin-top:4px;">登录密码：<span id="pw-text">••••••••</span> <a href="#" style="color:var(--primary-6);" onclick="togglePw();return false;" id="pw-toggle">显示</a></div>' : '') +
+    '</div>' +
+    '<div class="ph-stats">' +
+    '<div style="text-align:center;"><div class="num">' + counts.notes + '</div><div class="lbl">笔记</div></div>' +
+    '<div style="text-align:center;"><div class="num">' + fmtNum(counts.likes) + '</div><div class="lbl">获赞</div></div>' +
+    '<div style="text-align:center;"><a href="/followers?u=' + encodeURIComponent(user.id) + '&t=following" style="display:block;"><div class="num">' + counts.following + '</div><div class="lbl">关注</div></a></div>' +
+    '<div style="text-align:center;"><a href="/followers?u=' + encodeURIComponent(user.id) + '&t=followers" style="display:block;"><div class="num">' + counts.followers + '</div><div class="lbl">粉丝</div></a></div>' +
+    '</div>' +
+    (isSelf
+      ? '<div style="display:flex; gap:var(--space-2); flex-wrap:wrap;">' +
+        '<button class="btn btn-outline btn-md" onclick="openEdit()">编辑资料</button>' +
+        '<button class="btn btn-outline btn-md" onclick="changePassword()">修改密码</button>' +
+        '<a class="btn btn-primary btn-md" href="/publish">+ 发布</a>' +
+        ((!user.officialVerified && !user.officialPending) ? '<button class="btn btn-outline btn-md" style="color:#1664FF;" onclick="applyOfficialVerify()">' + (user.officialRejected ? '重新申请官方认证' : '申请官方认证') + '</button>' : '') +
+        '</div>'
+      : '<div style="display:flex; gap:var(--space-2); flex-wrap:wrap;">' +
+        '<button class="btn ' + (following ? 'btn-outline' : 'btn-primary') + ' btn-md" id="follow-btn">' + (following ? '已关注' : '+ 关注') + '</button>' +
+        friendBtnHTML(relation) +
+        '<a class="btn btn-outline btn-md" href="/messages?u=' + encodeURIComponent(user.id) + '">私信</a>' +
+        '</div>');
+  const fb = document.getElementById('follow-btn');
+  if (fb) fb.addEventListener('click', async () => {
+    try {
+      const r = await api('/api/user/' + user.id + '/follow', { method: 'POST', body: {} });
+      following = r.following;
+      fb.textContent = following ? '已关注' : '+ 关注';
+      fb.classList.toggle('btn-primary', !following);
+      fb.classList.toggle('btn-outline', following);
+      toast(following ? '已关注' : '已取消关注');
+    } catch (e) { toast(e.message, true); }
+  });
+  const frBtn = document.getElementById('friend-btn');
+  if (frBtn) frBtn.addEventListener('click', onFriendBtn);
+  // Tab：仅自己显示收藏
+  const tabs = document.getElementById('profile-tabs');
+  if (isSelf) {
+    tabs.style.display = 'flex';
+    tabs.querySelectorAll('.chip').forEach(c => c.addEventListener('click', () => {
+      tabs.querySelectorAll('.chip').forEach(x => x.classList.remove('active'));
+      c.classList.add('active');
+      if (c.dataset.tab === 'favs') loadFavs();
+      else if (c.dataset.tab === 'history') loadHistory();
+      else loadNotes();
+    }));
+  }
+}
+
+function friendBtnHTML(rel) {
+  if (rel === 'friend') return '<button class="btn btn-outline btn-md" id="friend-btn">已是好友</button>';
+  if (rel === 'requestSent') return '<button class="btn btn-outline btn-md" id="friend-btn" disabled>已发送请求</button>';
+  if (rel === 'requestReceived') return '<button class="btn btn-primary btn-md" id="friend-btn">接受好友请求</button>';
+  return '<button class="btn btn-outline btn-md" id="friend-btn">+ 加好友</button>';
+}
+
+async function onFriendBtn() {
+  try {
+    if (relation === 'requestReceived') {
+      const d = await api('/api/friends/requests');
+      const req = d.received.find(x => x.fromId === user.id);
+      if (!req) { toast('请求已过期', true); return; }
+      await api('/api/friends/requests/' + req.id + '/accept', { method: 'POST', body: {} });
+      toast('已成为好友');
+    } else if (relation === 'friend') {
+      toast('你们已经是好友了');
+      return;
+    } else {
+      await api('/api/friends/request', { method: 'POST', body: { uid: user.uid } });
+      toast('好友请求已发送');
+    }
+    const d = await api('/api/user/' + uid);
+    user = d.user; counts = d.counts; following = d.following; relation = d.relation;
+    renderHeader();
+  } catch (e) { toast(e.message, true); }
+}
+
+function copyUid() {
+  const uidVal = user.uid || '';
+  if (navigator.clipboard) { navigator.clipboard.writeText(uidVal); } else {
+    const ta = document.createElement('textarea'); ta.value = uidVal; document.body.appendChild(ta); ta.select();
+    document.execCommand('copy'); ta.remove();
+  }
+  toast('用户号已复制：' + uidVal);
+}
+
+/* 查看自己的登录密码（显示/隐藏切换；仅本人可见） */
+let pwShown = false;
+function togglePw() {
+  pwShown = !pwShown;
+  const t = document.getElementById('pw-text'), b = document.getElementById('pw-toggle');
+  if (!t || !b) return;
+  t.textContent = pwShown ? user.passwordPlain : '••••••••';
+  b.textContent = pwShown ? '隐藏' : '显示';
+}
+
+async function loadNotes() {
+  const notes = await api('/api/user/' + uid + '/notes');
+  renderFeed(document.getElementById('feed'), notes);
+}
+
+async function loadFavs() {
+  const favs = await api('/api/me/favorites');
+  renderFeed(document.getElementById('feed'), favs, '还没有收藏任何笔记');
+}
+
+/* ---------- 浏览历史（管理：查看/单条移除/一键清空） ---------- */
+async function loadHistory() {
+  const hist = await api('/api/me/history');
+  const feed = document.getElementById('feed');
+  if (!hist || hist.length === 0) {
+    feed.innerHTML = '<div class="hist-empty">还没有浏览记录。你打开看过的笔记会出现在这里，可随时管理。</div>';
+    return;
+  }
+  feed.innerHTML =
+    '<div class="hist-bar">' +
+    '<span class="hint">共 ' + hist.length + ' 条 · 你打开看过的笔记</span>' +
+    '<button class="btn btn-outline btn-sm" onclick="clearHistory()">清空历史</button>' +
+    '</div>' +
+    '<div class="hist-list">' +
+    hist.map(h => {
+      const n = h.note || {};
+      const cover = n.media && n.media[0] ? n.media[0] : '';
+      return '<div class="hist-item" onclick="location.href=\'/note?id=' + esc(n.id) + '\'">' +
+        (cover ? '<img class="hist-cover" src="' + esc(cover) + '" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
+               : '<div class="hist-cover" style="display:flex;align-items:center;justify-content:center;color:var(--color-text-3);font-size:22px;">' + ICON.eye.replace('width="46" height="46"', 'width="24" height="24"') + '</div>') +
+        '<div class="hist-info">' +
+        '<div class="hist-title">' + esc(n.title || '（无标题笔记）') + '</div>' +
+        '<div class="hist-meta">' + fmtTime(h.viewedAt) + ' 看过 · ' + fmtNum(n.views || 0) + ' 浏览 · ♡' + fmtNum(n.likeCount || 0) + ' ☆' + fmtNum(n.favoriteCount || 0) + '</div>' +
+        '</div>' +
+        '<button class="hist-del" title="移除记录" onclick="event.stopPropagation();removeHistory(\'' + escJS(n.id) + '\');return false;">×</button>' +
+        '</div>';
+    }).join('') +
+    '</div>';
+}
+
+async function removeHistory(noteId) {
+  try {
+    await api('/api/me/history/' + encodeURIComponent(noteId), { method: 'DELETE' });
+    toast('已从历史移除');
+    loadHistory();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function clearHistory() {
+  const ok = await confirmDialog('清空浏览历史', '确定清空全部浏览历史记录吗？此操作不可恢复。', '清空');
+  if (!ok) return;
+  try {
+    await api('/api/me/history', { method: 'DELETE' });
+    toast('历史已清空');
+    loadHistory();
+  } catch (e) { toast(e.message, true); }
+}
+
+/* ---------- 编辑资料 ---------- */
+function openEdit() {
+  document.getElementById('edit-nickname').value = user.nickname;
+  document.getElementById('edit-bio').value = user.bio || '';
+  newAvatarPath = null;
+  renderAvatarPreview();
+  document.getElementById('edit-mask').classList.add('open');
+}
+function closeEdit() { document.getElementById('edit-mask').classList.remove('open'); }
+
+/* 点击遮罩空白处 / 按 Esc 关闭编辑弹窗 */
+document.getElementById('edit-mask').addEventListener('click', e => {
+  if (e.target.id === 'edit-mask') closeEdit();
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && document.getElementById('edit-mask').classList.contains('open')) closeEdit();
+});
+
+function renderAvatarPreview() {
+  document.getElementById('avatar-preview').innerHTML =
+    newAvatarPath ? avatarHTML(user.nickname, newAvatarPath, 'large')
+                  : avatarHTML(user.nickname, user.avatar, 'large');
+}
+
+document.getElementById('avatar-input').addEventListener('change', async e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const fd = new FormData();
+  fd.append('file', f);
+  try {
+    const r = await api('/api/upload', { method: 'POST', form: fd });
+    newAvatarPath = r.path;
+    renderAvatarPreview();
+    toast('头像已选择，保存后生效');
+  } catch (err) { toast(err.message, true); }
+  e.target.value = '';
+});
+
+async function saveEdit() {
+  const nickname = document.getElementById('edit-nickname').value.trim();
+  const bio = document.getElementById('edit-bio').value.trim();
+  const body = { bio };
+  if (nickname) body.nickname = nickname;
+  if (newAvatarPath) body.avatar = newAvatarPath;
+  try {
+    await api('/api/me/update', { method: 'POST', body });
+    toast('资料已保存');
+    closeEdit();
+    const d = await api('/api/user/' + uid);
+    user = d.user; counts = d.counts; following = d.following; relation = d.relation;
+    renderHeader();
+    renderTopNav(); // 刷新顶栏头像/昵称
+  } catch (err) { toast(err.message, true); }
+}
+
+// 申请官方认证：填写认证材料说明 + 可选上传材料附件（需管理员审核）
+function applyOfficialVerify() {
+  let files = [];
+  openModal(
+    '<h3>申请官方认证</h3>' +
+    '<div class="modal-msg" style="margin-bottom:12px;">请填写你的认证材料（如机构名称、资质说明、身份介绍等），也可上传证明材料图片。提交后需管理员审核通过，即可获得「官方认证」标识。</div>' +
+    '<textarea id="of-material" placeholder="认证材料说明（必填）：例如 某某机构/工作室 主理人，提供 xx 服务…" style="width:100%; height:90px; border:1px solid var(--color-border-3); border-radius:var(--radius-sm); padding:10px 12px; font-size:15px; font-family:inherit; resize:vertical; outline:none; box-sizing:border-box;" onfocus="this.style.borderColor=\'var(--primary-6)\'" onblur="this.style.borderColor=\'\'"></textarea>' +
+    '<div style="margin-top:10px; display:flex; align-items:center; gap:8px;">' +
+    '<label class="btn btn-outline btn-sm" style="cursor:pointer; margin:0;">选择证明材料<input type="file" id="of-file" accept="image/*" multiple style="display:none;"></label>' +
+    '<span id="of-files" style="font-size:12px; color:var(--color-text-3);"></span>' +
+    '</div>' +
+    '<div class="modal-actions">' +
+    '<button class="btn btn-outline btn-md" id="__m_cancel">取消</button>' +
+    '<button class="btn btn-primary btn-md" id="__m_ok">提交申请</button>' +
+    '</div>',
+    (card, close) => {
+      card.querySelector('#__m_cancel').addEventListener('click', close);
+      card.querySelector('#of-file').addEventListener('change', async e => {
+        const label = card.querySelector('#of-files');
+        const chosen = [];
+        for (const f of e.target.files) {
+          const fd = new FormData();
+          fd.append('file', f);
+          try {
+            const r = await api('/api/upload', { method: 'POST', form: fd });
+            chosen.push(r.path);
+            label.textContent = '已选 ' + chosen.length + ' 张';
+          } catch (err) { toast('上传失败: ' + err.message, true); }
+        }
+        files = chosen;
+        e.target.value = '';
+      });
+      card.querySelector('#__m_ok').addEventListener('click', async () => {
+        const material = card.querySelector('#of-material').value.trim();
+        if (!material) { toast('请填写认证材料说明', true); return; }
+        const btn = card.querySelector('#__m_ok');
+        btn.disabled = true; btn.textContent = '提交中…';
+        try {
+          await api('/api/me/official/request', { method: 'POST', body: { material, files } });
+          close();
+          toast('官方认证申请已提交，请等待管理员审核');
+          const d = await api('/api/user/' + uid);
+          user = d.user;
+          renderHeader();
+        } catch (err) { toast(err.message, true); btn.disabled = false; btn.textContent = '提交申请'; }
+      });
+    }
+  );
+}
+
+/* 修改密码：验证旧密码 → 设置新密码 → 成功后所有会话失效，跳转登录页重新登录 */
+function changePassword() {
+  openModal(
+    '<h3>修改密码</h3>' +
+    '<div class="modal-msg" style="margin-bottom:12px;">输入旧密码与新密码。修改成功后当前登录会失效，需使用新密码重新登录。</div>' +
+    '<input class="modal-input" type="password" id="cp-old" placeholder="旧密码" style="margin-bottom:10px;" autocomplete="current-password">' +
+    '<input class="modal-input" type="password" id="cp-new" placeholder="新密码（至少 6 位）" style="margin-bottom:10px;" autocomplete="new-password">' +
+    '<input class="modal-input" type="password" id="cp-new2" placeholder="确认新密码" autocomplete="new-password">' +
+    '<div class="modal-actions">' +
+    '<button class="btn btn-outline btn-md" id="__m_cancel">取消</button>' +
+    '<button class="btn btn-primary btn-md" id="__m_ok">确认修改</button>' +
+    '</div>',
+    (card, close) => {
+      const old = card.querySelector('#cp-old'), nw = card.querySelector('#cp-new'), nw2 = card.querySelector('#cp-new2');
+      card.querySelector('#__m_cancel').addEventListener('click', close);
+      card.querySelector('#__m_ok').addEventListener('click', async () => {
+        const oldPw = old.value, newPw = nw.value;
+        if (!oldPw || !newPw) { toast('请填写旧密码和新密码', true); return; }
+        if (newPw.length < 6) { toast('新密码至少 6 位', true); return; }
+        if (newPw !== nw2.value) { toast('两次输入的新密码不一致', true); return; }
+        const btn = card.querySelector('#__m_ok');
+        btn.disabled = true; btn.textContent = '提交中…';
+        try {
+          await api('/api/me/password', { method: 'POST', body: { oldPassword: oldPw, newPassword: newPw } });
+          close();
+          toast('密码已修改，请使用新密码重新登录');
+          setTimeout(() => { location.href = '/login'; }, 900);
+        } catch (err) { toast(err.message, true); btn.disabled = false; btn.textContent = '确认修改'; }
+      });
+    }
+  );
+}
+
+(async function init() {
+  try { me = await renderTopNav(); } catch (e) { location.href = '/login'; return; }
+  if (!uid) uid = me.id;
+  try {
+    const d = await api('/api/user/' + uid);
+    user = d.user; counts = d.counts; following = d.following; relation = d.relation;
+    renderHeader();
+    loadNotes();
+  } catch (e) {
+    document.getElementById('feed').innerHTML = '<div class="empty-state"><div class="big">' + ICON.alert + '</div>' + esc(e.message) + '</div>';
+  }
+})();
+</script>
+</body>
+</html>

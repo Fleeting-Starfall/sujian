@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>发布笔记 - 素见</title>
+<link rel="stylesheet" href="/css/colors_and_type.css">
+<link rel="stylesheet" href="/css/components.css">
+<link rel="stylesheet" href="/css/app.css">
+<style>
+.pub-card { max-width: 760px; margin: 0 auto; background: var(--color-bg-white); border-radius: var(--radius-lg); box-shadow: var(--shadow-2); padding: var(--space-8); }
+.seg { display: inline-flex; background: var(--color-bg-4); border-radius: var(--radius-full); padding: 3px; gap: 2px; }
+.seg button { border: none; background: transparent; padding: 7px 18px; border-radius: var(--radius-full); font-size: var(--font-size-lead); color: var(--color-text-2); }
+.seg button.on { background: var(--color-bg-white); color: var(--primary-6); font-weight: 500; box-shadow: var(--shadow-1); }
+.upload-box { border: 1.5px dashed var(--color-border-3); border-radius: var(--radius-md); padding: var(--space-6); text-align: center; color: var(--color-text-3); cursor: pointer; transition: all .15s; }
+.upload-box:hover { border-color: var(--primary-6); color: var(--primary-6); }
+.preview-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: var(--space-3); margin-top: var(--space-3); }
+.preview-grid .pv { position: relative; border-radius: var(--radius-sm); overflow: hidden; }
+.preview-grid img, .preview-grid video { width: 100%; height: 120px; object-fit: cover; display: block; background: #000; }
+.preview-grid .del { position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; border-radius: 50%; background: rgba(0,0,0,.55); color: #fff; border: none; font-size: 14px; line-height: 1; cursor: pointer; }
+.readonly-media { display: flex; gap: var(--space-3); flex-wrap: wrap; }
+.readonly-media img, .readonly-media video { width: 120px; height: 120px; object-fit: cover; border-radius: var(--radius-sm); background: #000; }
+</style>
+</head>
+<body>
+<header id="topnav" class="app-topnav"></header>
+
+<div class="container">
+  <div class="pub-card">
+    <h2 style="font-size: var(--font-size-h2); margin-bottom: var(--space-5);" id="pub-title">发布笔记</h2>
+    <form id="pub-form">
+      <div class="field" id="type-field">
+        <label>笔记类型</label>
+        <div class="seg" id="seg">
+          <button type="button" class="on" data-t="image"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 12 12" fill="none" width="15" height="15" style="vertical-align:-2px;margin-right:4px;"><path fill-rule="evenodd" clip-rule="evenodd" d="M3.777 1.812c.163-.252.26-.313.463-.313h3.5c.2 0 .298.055.46.302l.3.449h2.45c.304 0 .55.224.55.5v7.5c0 .276-.246.5-.55.5h-9.9c-.304 0-.55-.224-.55-.5v-7.5c0-.276.246-.5.55-.5H3.5l.277-.438zm6.586 1.607H1.57v6.324h8.793V3.419zm-4.373.712a2.437 2.437 0 110 4.875 2.437 2.437 0 010-4.875zM6 5.25a1.313 1.313 0 100 2.625A1.313 1.313 0 006 5.25z" fill="currentColor"/></svg>图文</button>
+          <button type="button" data-t="video"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none" width="15" height="15" style="vertical-align:-2px;margin-right:4px;"><path fill-rule="evenodd" clip-rule="evenodd" d="M31 8a2 2 0 011.995 1.85L33 10v28a2 2 0 01-1.85 1.995L31 40H20v-4h9V12H5v15H1V10a2 2 0 011.85-1.995L3 8h28zm16 7.532v16.936c0 1.554-1.865 2.514-3.332 1.715L36 30V18l7.668-4.183c1.467-.8 3.332.16 3.332 1.715zm-4 3.533l-3 1.2v7.47l3 1.2v-9.87zM10 16h4a1 1 0 01.993.883L15 17v4a1 1 0 01-.883.993L14 22h-4a1 1 0 01-.993-.883L9 21v-4a1 1 0 01.883-.993L10 16h4-4z" fill="currentColor"/></svg>视频</button>
+        </div>
+      </div>
+      <div class="field" id="media-field">
+        <label id="media-label">封面与内容（图文可多选，视频选一个）</label>
+        <div class="upload-box" id="upload-box" style="display:none;">
+          <div style="margin-bottom:8px;"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" width="30" height="30"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+          点击选择文件（图片 jpg/png/gif/webp，视频 mp4/webm/mov）
+        </div>
+        <input type="file" id="file-input" accept="image/*,video/*" multiple style="display:none">
+        <div class="preview-grid" id="preview-grid"></div>
+        <div class="readonly-media" id="readonly-media"></div>
+      </div>
+      <div class="field">
+        <label>标题</label>
+        <input type="text" id="title" maxlength="60" placeholder="给笔记起个标题">
+      </div>
+      <div class="field">
+        <label>正文</label>
+        <textarea id="content" rows="6" placeholder="记录你的想法、经验、故事…"></textarea>
+      </div>
+      <div class="field" style="display:grid; grid-template-columns:1fr 1fr; gap:var(--space-4);">
+        <div>
+          <label>频道分类</label>
+          <select id="category">
+            <option value="生活">生活</option>
+            <option value="穿搭">穿搭</option>
+            <option value="美食">美食</option>
+            <option value="旅行">旅行</option>
+            <option value="数码">数码</option>
+            <option value="家居">家居</option>
+            <option value="学习">学习</option>
+            <option value="健身">健身</option>
+            <option value="萌宠">萌宠</option>
+            <option value="影视">影视</option>
+            <option value="游戏">游戏</option>
+          </select>
+        </div>
+        <div>
+          <label>标签（逗号分隔）</label>
+          <input type="text" id="tags" placeholder="例如：探店, 周末">
+        </div>
+      </div>
+      <div style="display:flex; gap:var(--space-3);">
+        <button type="submit" class="btn btn-primary btn-lg" style="flex:1;" id="btn">发 布</button>
+        <button type="button" class="btn btn-outline btn-lg" id="draft-btn">保存草稿</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="/js/app.js"></script>
+<script>
+'use strict';
+const editId = getQuery('edit');
+const draftId = getQuery('draft');
+let mode = editId ? 'note' : (draftId ? 'draft' : 'new');
+let mediaType = 'image';
+let coverPath = null;
+let readOnlyMedia = [];   // note 模式已有媒体（只读）
+const files = [];         // {file, path} 新上传或草稿已有路径
+
+const seg = document.getElementById('seg');
+const uploadBox = document.getElementById('upload-box');
+const fileInput = document.getElementById('file-input');
+
+seg.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+  if (mode === 'note') { toast('已发布的媒体不可更换，如要换请删除重发'); return; }
+  const nt = b.dataset.t;
+  if (nt !== mediaType) {
+    mediaType = nt;
+    files.length = 0; coverPath = null; // 类型切换后清空已选媒体，避免图文/视频混用
+    renderPreviews();
+    toast('已切换为' + (nt === 'video' ? '视频' : '图文') + '，请重新选择文件');
+  }
+  seg.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+  fileInput.accept = mediaType === 'video' ? 'video/*' : 'image/*';
+}));
+
+uploadBox.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', () => {
+  const list = Array.from(fileInput.files);
+  const max = mediaType === 'video' ? 1 : 9;
+  for (const f of list) {
+    if (files.length >= max) { toast('最多 ' + max + ' 个文件', true); break; }
+    files.push({ file: f, path: null });
+  }
+  renderPreviews();
+  fileInput.value = '';
+});
+
+function renderPreviews() {
+  const grid = document.getElementById('preview-grid');
+  grid.innerHTML = files.map((f, i) => {
+    if (f.file && !f.url) f.url = URL.createObjectURL(f.file); // 每个本地文件只建一次 URL
+    const isV = f.file ? f.file.type.startsWith('video') : false;
+    const src = f.file ? f.url : f.path;
+    return '<div class="pv">' + (isV ? '<video src="' + src + '" muted playsinline></video>' : '<img src="' + src + '">') +
+      '<button type="button" class="del" onclick="removeFile(' + i + ')">×</button></div>';
+  }).join('');
+}
+
+window.removeFile = i => {
+  const f = files[i];
+  if (f && f.url) URL.revokeObjectURL(f.url);
+  files.splice(i, 1);
+  renderPreviews();
+};
+
+/* 视频封面截帧：加载视频 → 跳转到开头 → canvas 截图 → blob
+   健壮性：多事件兜底(seeked/canplay 都能触发截图)、0 尺寸保护、8s 总超时防卡住发布 */
+function grabFrame(file) {
+  return new Promise(resolve => {
+    const url = URL.createObjectURL(file);
+    const v = document.createElement('video');
+    v.src = url; v.muted = true; v.playsInline = true; v.preload = 'auto';
+    let settled = false;
+    const done = blob => { if (settled) return; settled = true; URL.revokeObjectURL(url); resolve(blob); };
+    const snap = () => {
+      try {
+        if (!v.videoWidth || !v.videoHeight) return done(null); // 无有效帧尺寸，放弃
+        const c = document.createElement('canvas');
+        c.width = v.videoWidth; c.height = v.videoHeight;
+        c.getContext('2d').drawImage(v, 0, 0);
+        c.toBlob(b => done(b), 'image/jpeg', 0.85);
+      } catch (e) { done(null); }
+    };
+    v.onloadeddata = () => {
+      const go = () => { try { v.currentTime = Math.min(0.5, (v.duration || 10) * 0.1); } catch (e) { snap(); } };
+      if (v.paused) { v.play().then(go).catch(go); } else go();
+    };
+    v.onseeked = snap;   // 跳转完成后截图
+    v.oncanplay = snap;  // 兜底：部分编码 seek 不触发 seeked
+    v.onerror = () => done(null);
+    setTimeout(() => done(null), 8000); // 总超时，截帧失败不影响发布
+  });
+}
+
+async function uploadPending() {
+  for (const f of files) {
+    if (!f.path) {
+      const fd = new FormData();
+      fd.append('file', f.file);
+      const r = await api('/api/upload', { method: 'POST', form: fd });
+      f.path = r.path;
+    }
+  }
+}
+
+async function saveDraft() {
+  const btn = document.getElementById('draft-btn');
+  if (btn && btn.disabled) return;
+  if (btn) btn.disabled = true;
+  try {
+    await uploadPending();
+    const body = {
+      id: draftId || '',
+      title: document.getElementById('title').value.trim(),
+      content: document.getElementById('content').value.trim(),
+      mediaType,
+      media: files.map(f => f.path).filter(Boolean),
+      cover: coverPath || '',
+      tags: splitTags(),
+      category: document.getElementById('category').value
+    };
+    const r = await api('/api/drafts', { method: 'POST', body });
+    toast('草稿已保存');
+    if (!draftId) location.href = '/publish?draft=' + r.id;
+  } catch (e) { toast(e.message, true); }
+  if (btn) btn.disabled = false;
+}
+
+function splitTags() {
+  return document.getElementById('tags').value.split(/[,，]/).map(s => s.trim()).filter(Boolean);
+}
+
+async function submit(e) {
+  e.preventDefault();
+  const btn = document.getElementById('btn');
+  const title = document.getElementById('title').value.trim();
+  const content = document.getElementById('content').value.trim();
+  const category = document.getElementById('category').value;
+  const tags = splitTags();
+
+  btn.disabled = true;
+  try {
+    if (mode === 'note') {
+      btn.textContent = '保存中…';
+      const r = await api('/api/notes/' + editId, { method: 'PUT', body: { title: title || undefined, content, tags, category } });
+      toast(r.message || '已保存修改，将重新进入审核');
+      // 接口返回 {note, message},笔记 id 在 r.note.id(此前误用 r.id 导致跳转到 /note?id=undefined 404)
+      const savedId = (r.note && r.note.id) || editId;
+      setTimeout(() => location.href = '/note?id=' + savedId, 1500);
+      return;
+    }
+    if (files.length === 0) { toast('请先选择图片或视频', true); btn.disabled = false; return; }
+    btn.textContent = '上传中…';
+    await uploadPending();
+    btn.textContent = '发布中…';
+    if (mediaType === 'video' && !coverPath && files[0].file) {
+      try {
+        const blob = await grabFrame(files[0].file);
+        if (blob) {
+          const fd = new FormData();
+          fd.append('file', new File([blob], 'cover.jpg', { type: 'image/jpeg' }));
+          const r = await api('/api/upload', { method: 'POST', form: fd });
+          coverPath = r.path;
+        }
+      } catch (e) { /* 截帧失败不影响发布 */ }
+    }
+    const r = await api('/api/notes', {
+      method: 'POST',
+      body: { title: title || '无标题笔记', content, mediaType, media: files.map(f => f.path), cover: coverPath || '', tags, category }
+    });
+    if (draftId) { try { await api('/api/drafts/' + draftId, { method: 'DELETE' }); } catch (e) {} }
+    if (r.note && r.note.status === 'pending') {
+      toast('已提交审核，管理员通过定级后将对其他用户可见');
+      setTimeout(() => location.href = '/', 1200);
+    } else {
+      toast('发布成功！');
+      setTimeout(() => location.href = '/note?id=' + r.note.id, 800);
+    }
+  } catch (err) {
+    toast(err.message, true);
+    btn.disabled = false; btn.textContent = mode === 'note' ? '保存修改' : '发 布';
+  }
+}
+
+async function init() {
+  document.getElementById('pub-form').addEventListener('submit', submit);
+  document.getElementById('draft-btn').addEventListener('click', saveDraft);
+  try { await renderTopNav(); } catch (e) { location.href = '/login'; return; }
+
+  if (mode === 'note') {
+    document.getElementById('pub-title').textContent = '编辑笔记';
+    document.getElementById('btn').textContent = '保存修改';
+    document.getElementById('draft-btn').style.display = 'none';
+    document.getElementById('type-field').style.display = 'none';
+    document.getElementById('media-label').textContent = '已发布媒体（不可修改，如要更换请删除重发）';
+    const tip = document.createElement('div');
+    tip.style.cssText = 'background:#fff7e6;border:1px solid #ffd591;color:#ad6800;border-radius:var(--radius-md, 10px);padding:10px 14px;margin-bottom:var(--space-4, 16px);font-size:var(--font-size-lead, 14px);';
+    tip.textContent = '保存修改后笔记将重新进入审核，管理员审核定级通过后才会对其他用户重新可见。';
+    document.getElementById('pub-form').prepend(tip);
+    const d = await api('/api/notes/' + editId);
+    const n = d.note;
+    if (n.authorId !== (await api('/api/me')).id) { toast('只能编辑自己的笔记', true); location.href = '/'; return; }
+    document.getElementById('title').value = n.title;
+    document.getElementById('content').value = n.content;
+    document.getElementById('category').value = n.category;
+    document.getElementById('tags').value = (n.tags || []).join(', ');
+    readOnlyMedia = n.media || [];
+    document.getElementById('readonly-media').innerHTML = (n.media || []).map(m =>
+      (n.mediaType === 'video' ? '<video src="' + esc(m) + '" muted playsinline></video>' : '<img src="' + esc(m) + '">')
+    ).join('');
+    return;
+  }
+
+  if (mode === 'draft') {
+    document.getElementById('pub-title').textContent = '编辑草稿';
+    document.getElementById('btn').textContent = '发布笔记';
+    const drafts = await api('/api/drafts');
+    const d = drafts.find(x => x.id === draftId);
+    if (!d) { toast('草稿不存在', true); location.href = '/drafts'; return; }
+    mediaType = d.mediaType || 'image';
+    seg.querySelectorAll('button').forEach(x => x.classList.toggle('on', x.dataset.t === mediaType));
+    fileInput.accept = mediaType === 'video' ? 'video/*' : 'image/*';
+    document.getElementById('title').value = d.title || '';
+    document.getElementById('content').value = d.content || '';
+    document.getElementById('category').value = d.category || '生活';
+    document.getElementById('tags').value = (d.tags || []).join(', ');
+    coverPath = d.cover || null;
+    (d.media || []).forEach(p => files.push({ file: null, path: p }));
+    uploadBox.style.display = 'block'; // 草稿可继续添加文件
+    renderPreviews();
+  } else {
+    uploadBox.style.display = 'block';
+  }
+}
+
+init();
+</script>
+</body>
+</html>

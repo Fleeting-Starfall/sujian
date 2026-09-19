@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>好友 - 素见</title>
+<link rel="stylesheet" href="/css/colors_and_type.css">
+<link rel="stylesheet" href="/css/components.css">
+<link rel="stylesheet" href="/css/app.css">
+<style>
+.fr-page { max-width: 720px; margin: 0 auto; }
+.fr-add { display: flex; gap: var(--space-3); margin: var(--space-4) 0 var(--space-5); }
+.fr-add input { flex: 1; height: 38px; border: 1px solid var(--color-border-3); border-radius: var(--radius-md); padding: 0 14px; font-size: var(--font-size-h4); outline: none; letter-spacing: 2px; }
+.fr-add input:focus { border-color: var(--primary-6); }
+.fr-sec-title { font-size: var(--font-size-h3); font-weight: 600; margin: var(--space-5) 0 var(--space-3); }
+.fr-item { display: flex; align-items: center; gap: var(--space-4); background: var(--color-bg-white); border-radius: var(--radius-md); box-shadow: var(--shadow-1); padding: var(--space-4); margin-bottom: var(--space-3); }
+.fr-item .fr-info { flex: 1; min-width: 0; }
+.fr-item .fr-info .name { font-weight: var(--font-weight-medium); }
+.fr-item .fr-info .meta { font-size: var(--font-size-body); color: var(--color-text-3); margin-top: 2px; }
+.fr-uid { font-family: var(--font-mono); color: var(--primary-6); letter-spacing: 1px; }
+.search-result { margin: var(--space-3) 0; }
+</style>
+</head>
+<body>
+<header id="topnav" class="app-topnav"></header>
+
+<div class="container">
+  <div class="fr-page">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin: var(--space-4) 0;">
+      <h2 style="font-size: var(--font-size-h2);">好友</h2>
+      <span style="color:var(--color-text-3); font-size:var(--font-size-lead);">我的用户号：<b class="fr-uid" id="my-uid"></b></span>
+    </div>
+
+    <div class="fr-add">
+      <input type="text" id="uid-input" maxlength="8" placeholder="输入对方 8 位用户号添加好友" onkeydown="if(event.key==='Enter')addFriend()">
+      <button class="btn btn-primary btn-md" onclick="addFriend()">添加</button>
+    </div>
+    <div id="search-result"></div>
+
+    <div class="fr-sec-title">收到的好友请求</div>
+    <div id="req-list"></div>
+
+    <div class="fr-sec-title">我的好友（<span id="fr-count">0</span>）</div>
+    <div id="fr-list"></div>
+  </div>
+</div>
+
+<script src="/js/app.js"></script>
+<script>
+'use strict';
+let me = null;
+
+async function addFriend() {
+  const uid = document.getElementById('uid-input').value.trim().toUpperCase();
+  if (!uid) { toast('请输入用户号', true); return; }
+  const box = document.getElementById('search-result');
+  try {
+    const r = await api('/api/uid/' + encodeURIComponent(uid));
+    const u = r.user;
+    let action = '';
+    if (u.id === me.id) action = '<span style="color:var(--color-text-3);">这是你自己</span>';
+    else if (r.relation === 'friend') action = '<span style="color:var(--color-success);">你们已是好友</span>';
+    else if (r.relation === 'requestSent') action = '<span style="color:var(--color-text-3);">已发送请求，等待对方确认</span>';
+    else if (r.relation === 'requestReceived') action = '<button class="btn btn-primary btn-sm" onclick="acceptByUid(\'' + u.id + '\');event.stopPropagation();">接受请求</button>';
+    else action = '<button class="btn btn-primary btn-sm" onclick="sendReq(\'' + u.id + '\');event.stopPropagation();">+ 加好友</button>';
+    box.innerHTML = '<div class="fr-item search-result" onclick="location.href=\'/profile?u=' + esc(u.id) + '\'">' +
+      avatarHTML(u.nickname, u.avatar, 'medium') +
+      '<div class="fr-info"><div class="name">' + esc(u.nickname) + '</div>' +
+      '<div class="meta">用户号 <b class="fr-uid">' + esc(u.uid) + '</b> · @' + esc(u.username) + '</div></div>' + action + '</div>';
+  } catch (e) {
+    box.innerHTML = '<div class="panel" style="color:var(--color-danger);">' + esc(e.message) + '</div>';
+  }
+}
+
+async function sendReq(targetId) {
+  try {
+    const r = await api('/api/user/' + targetId);
+    await api('/api/friends/request', { method: 'POST', body: { uid: r.user.uid } });
+    toast('好友请求已发送');
+    addFriend();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function acceptByUid(targetId) {
+  try {
+    const reqs = (await api('/api/friends/requests')).received;
+    const req = reqs.find(x => x.fromId === targetId);
+    if (!req) { toast('没有找到对应请求', true); return; }
+    await api('/api/friends/requests/' + req.id + '/accept', { method: 'POST', body: {} });
+    toast('已成为好友');
+    await Promise.all([renderReqs(), renderFriends()]);
+    document.getElementById('search-result').innerHTML = '';
+  } catch (e) { toast(e.message, true); }
+}
+
+async function renderReqs() {
+  const d = await api('/api/friends/requests');
+  const box = document.getElementById('req-list');
+  if (!d.received || d.received.length === 0) {
+    box.innerHTML = '<div class="panel" style="color:var(--color-text-3);">暂无收到的好友请求</div>';
+    return;
+  }
+  box.innerHTML = d.received.map(r =>
+    '<div class="fr-item">' + avatarHTML(r.fromName, '', 'medium') +
+    '<div class="fr-info"><div class="name">' + esc(r.fromName) + '</div><div class="meta">请求添加你为好友 · ' + fmtTime(r.createdAt) + '</div></div>' +
+    '<button class="btn btn-primary btn-sm" onclick="accept(\'' + r.id + '\')">接受</button>' +
+    '<button class="btn btn-outline btn-sm" style="color:var(--color-danger)" onclick="reject(\'' + r.id + '\')">拒绝</button>' +
+    '</div>'
+  ).join('');
+}
+
+window.accept = async id => {
+  try {
+    await api('/api/friends/requests/' + id + '/accept', { method: 'POST', body: {} });
+    toast('已成为好友');
+    await Promise.all([renderReqs(), renderFriends()]);
+  } catch (e) { toast(e.message, true); }
+};
+window.reject = async id => {
+  try {
+    await api('/api/friends/requests/' + id + '/reject', { method: 'POST', body: {} });
+    toast('已拒绝');
+    renderReqs();
+  } catch (e) { toast(e.message, true); }
+};
+
+async function renderFriends() {
+  const friends = await api('/api/friends');
+  document.getElementById('fr-count').textContent = friends.length;
+  const box = document.getElementById('fr-list');
+  if (friends.length === 0) {
+    box.innerHTML = '<div class="empty-state"><div class="big">' + ICON.eye + '</div>还没有好友，输入对方用户号添加吧</div>';
+    return;
+  }
+  box.innerHTML = friends.map(u =>
+    '<div class="fr-item" onclick="location.href=\'/profile?u=' + esc(u.id) + '\'">' +
+    avatarHTML(u.nickname, u.avatar, 'medium') +
+    '<div class="fr-info"><div class="name">' + esc(u.nickname) + (u.role === 'admin' ? ' <span class="status-tag status-tag-processing status-tag-text" style="font-size:11px;">管理员</span>' : '') + '</div>' +
+    '<div class="meta">用户号 <b class="fr-uid">' + esc(u.uid) + '</b> · ' + esc(u.bio || '这个人很懒～') + '</div></div>' +
+    '<button class="btn btn-text btn-sm" style="color:var(--color-danger)" onclick="delFriend(\'' + u.id + '\');event.stopPropagation();">删除</button>' +
+    '</div>'
+  ).join('');
+}
+
+window.delFriend = async id => {
+  if (!await confirmDialog('删除好友', '确定删除这位好友吗？', '删除')) return;
+  try {
+    await api('/api/friends/' + id, { method: 'DELETE' });
+    toast('已删除好友');
+    renderFriends();
+  } catch (e) { toast(e.message, true); }
+};
+
+(async function init() {
+  try { me = await renderTopNav(); } catch (e) { location.href = '/login'; return; }
+  document.getElementById('my-uid').textContent = me.uid || '—';
+  await Promise.all([renderReqs(), renderFriends()]);
+})();
+</script>
+</body>
+</html>

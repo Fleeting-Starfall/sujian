@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ASCII Cyberpunk City</title>
+  <style>
+    html,body{margin:0;padding:0;height:100%;background:#000;overflow:hidden}
+    #c{display:block;width:100%;height:100%;object-fit:contain;image-rendering:pixelated;cursor:crosshair}
+    /* CRT 扫描线 + 暗角 */
+    #fx{position:fixed;inset:0;z-index:5;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(0,0,0,.14) 0 1px,transparent 1px 3px)}
+    #fx::after{content:'';position:absolute;inset:0;background:radial-gradient(ellipse at center,transparent 55%,rgba(0,0,12,.5) 100%)}
+    #hud{position:fixed;top:8px;left:10px;color:#4ecdc4;font:12px/1.5 monospace;text-shadow:0 0 6px rgba(78,205,196,.8);z-index:10;user-select:none;pointer-events:none;letter-spacing:1px}
+    #hud b{color:#ffd166}
+    #overlay{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+      background:radial-gradient(ellipse at center,rgba(10,6,26,.92),rgba(2,2,10,.97) 78%);
+      color:#cfe9ff;font:15px/1.9 monospace;text-align:center;z-index:20;cursor:pointer;user-select:none}
+    #overlay .frame{position:relative;border:1px solid rgba(0,255,255,.28);padding:34px 52px;box-shadow:0 0 30px rgba(0,255,255,.1),inset 0 0 30px rgba(255,0,200,.05)}
+    #overlay .frame::before,#overlay .frame::after{content:'';position:absolute;width:20px;height:20px;border:2px solid #0ff}
+    #overlay .frame::before{top:-2px;left:-2px;border-right:0;border-bottom:0}
+    #overlay .frame::after{bottom:-2px;right:-2px;border-left:0;border-top:0}
+    #overlay h1{font-size:34px;margin:0 0 6px;letter-spacing:5px;
+      background:linear-gradient(90deg,#0ff,#7d7bff,#ff3eb2);-webkit-background-clip:text;background-clip:text;color:transparent;
+      filter:drop-shadow(0 0 14px rgba(125,123,255,.85))}
+    #overlay .sub{color:#7fdbff;margin-bottom:18px;letter-spacing:4px;font-size:12px;opacity:.92}
+    #overlay .keys{color:#9ff;background:rgba(0,255,255,.04);padding:12px 26px;border:1px solid rgba(0,255,255,.18);line-height:2.2}
+    #overlay .keys b{color:#ffd166;font-weight:normal}
+    #overlay .go{color:#0ff;text-shadow:0 0 10px #0ff;margin-top:26px;font-size:16px;letter-spacing:2px;animation:blink 1.2s infinite}
+    @keyframes blink{50%{opacity:.25}}
+  </style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="fx"></div>
+<div id="hud"></div>
+<div id="overlay">
+  <div class="frame">
+    <h1>ASCII <span class="p">CYBERPUNK</span> CITY</h1>
+    <div class="sub">—— 字符即像素 · 光线步进 ——</div>
+    <div class="keys">
+      <b>W A S D</b> 移动 &nbsp;·&nbsp; <b>鼠标拖拽 / 点击</b> 转向<br>
+      <b>Shift</b> 快跑 &nbsp;·&nbsp; <b>空格</b> 上升 &nbsp;·&nbsp; <b>C</b> 下降<br>
+      <b>Esc</b> 释放鼠标 &nbsp;·&nbsp; <b>双击</b> 重新锁定
+    </div>
+    <div class="go">点击进入城市 ▸</div>
+  </div>
+</div>
+<script>
+  'use strict';
+  /* ============================================================
+   * 可漫步 ASCII 赛博朋克城市 —— 单文件实现
+   * 原理:对屏幕每个字符单元发射射线,光线步进采样 SDF 场景,
+   *       命中后按 距离/法线/材质 映射为带颜色的 ASCII 字符。
+   * ============================================================ */
+
+  /* ---------------- 配置 ---------------- */
+  const CELL_W = 8, CELL_H = 16;          // 每字符 cell 像素尺寸
+  const FOV = 74 * Math.PI / 180;         // 水平视场角
+  const MAX_DIST = 95, MAX_STEPS = 40;   // 光线步进上限(15 单位内无雾,120 外全雾)
+  const EPS = 0.04;                        // 命中阈值
+  const RAMP = ' .:-=+*#%@';               // 暗→亮字符表
+  const FOG = [12, 12, 36];                 // 雾色(夜间紫黑)
+  const EYE = 1.7;                         // 眼睛高度
+  const BLOCK = 9, STREET = 4, P = BLOCK + STREET; // 街区/街道尺寸
+  const GRID = 13;                         // 街区数量(单方向)
+  const BASE_SEED = 0x6d2b79f5;
+
+  // 窗口/立面/霓虹调色板
+  const WINDOW_COLORS = [[255, 209, 102], [78, 205, 196], [162, 155, 254]];
+  const FACE_COLORS = [[112, 70, 176], [72, 118, 196], [186, 64, 168], [58, 134, 158], [150, 86, 158], [96, 118, 210]];
+  const NEON_COLORS = [[0, 255, 255], [255, 0, 128], [178, 102, 255], [255, 209, 102], [0, 229, 255]];
+  const SIGN_CHARS = ['中', '夜', '電', '霓', '$', '¥', '酒', '星', '門', '夢'];
+  // 代码雨:字符集 + 霓虹雨色
+  const MATRIX_CHARS = '0123456789アイウエオカキクケコサシスセソタチツテト';
+  const RAIN_COLORS = [[0, 255, 128], [0, 229, 255], [178, 102, 255], [255, 209, 102]];
+  const LIGHT = [0.45, 0.72, -0.52];
+
+  /* ---------------- 数学工具 ---------------- */
+  const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+  const lerp = (a, b, t) => a + (b - a) * t;
+  function norm3(v) {
+    const l = Math.hypot(v[0], v[1], v[2]) || 1;
+    return [v[0] / l, v[1] / l, v[2] / l];
+  }
+  // 可复现随机数
+  function mulberry32(a) {
+    return function () {
+      a |= 0; a = a + 0x6D2B79F5 | 0;
+      let t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+  // 整数坐标哈希 → [0,1)
+  function hash3(x, y, s) {
+    let h = (x * 374761393 + y * 668265263 + s * 974634331) | 0;
+    h = (h ^ h >>> 13) | 0; h = Math.imul(h, 1274126177);
+    return ((h ^ h >>> 16) >>> 0) / 4294967296;
+  }
+  const mod = (v, m) => ((v % m) + m) % m;
+
+  /* ---------------- 无尽城市生成 ---------------- */
+  // 街区坐标 (i, j) 的确定性种子:同一位置永远生成同一城市
+  function blockSeed(i, j) {
+    let h = (i * 374761393 + j * 668265263 + BASE_SEED) | 0;
+    h = (h ^ (h >>> 13)) | 0; h = Math.imul(h, 1274126177);
+    return (h ^ (h >>> 16)) >>> 0;
+  }
+  // 按需生成单个街区的建筑(确定性,可无限延伸)
+  function blockBuilding(i, j) {
+    if (i % 4 === 3 || j % 4 === 3) return null;   // 主干道留空(无限延伸的走廊)
+    if (i === 6 && j === 6) return null;           // 中心广场(出生点)
+    const rand = mulberry32(blockSeed(i, j));
+    if (rand() < 0.1) return null;                 // 广场/空地
+    const cx = i * P + BLOCK / 2, cz = j * P + BLOCK / 2;
+    // 4×4 街区共享一个区域高度系数,营造远处天际线起伏
+    const zoneH = 0.35 + hash3(i >> 2, j >> 2, 7) * 0.75;
+    const w = 3.2 + rand() * (BLOCK - 3.6);
+    const d = 3.2 + rand() * (BLOCK - 3.6);
+    const h = Math.max(6, 8 + zoneH * 42 * (0.5 + rand() * 0.8));
+    return {
+      x: cx, z: cz, w, d, h,
+      seed: (rand() * 0x7fffffff) | 0,
+      face: FACE_COLORS[(rand() * FACE_COLORS.length) | 0],
+      neon: NEON_COLORS[(rand() * NEON_COLORS.length) | 0],
+      winColor: WINDOW_COLORS[(rand() * WINDOW_COLORS.length) | 0],
+      density: 0.5 + rand() * 0.45,      // 亮窗概率
+      sign: rand() < 0.32,               // 是否带霓虹招牌
+      signChar: SIGN_CHARS[(rand() * SIGN_CHARS.length) | 0],
+      signColor: NEON_COLORS[(rand() * NEON_COLORS.length) | 0],
+      beam: rand() < 0.16                // 是否带全息光柱(冲上天际)
+    };
+  }
+
+  // 街区缓存(LRU):只保留最近访问的街区,玩家走远时旧街区被淘汰
+  const bcache = new Map();
+  const BCACHE_MAX = 2048;
+  // 收集射线当前位置 3×3 邻域街区的建筑(街区=网格单位,每街区至多一栋)
+  const _cands = [];
+  function nearby(x, z) {
+    _cands.length = 0;
+    const gi = Math.floor(x / P), gj = Math.floor(z / P);
+    for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) {
+      const key = (gi + di) * 4096 + (gj + dj);
+      let b = bcache.get(key);
+      if (b === undefined) {
+        b = blockBuilding(gi + di, gj + dj);
+        if (bcache.size >= BCACHE_MAX) {
+          const it = bcache.keys().next(); bcache.delete(it.value);
+        }
+        bcache.set(key, b);
+      }
+      if (b) _cands.push(b);
+    }
+    return _cands;
+  }
+
+  /* ---------------- SDF 场景 ---------------- */
+  // 轴对齐立方体 SDF(半尺寸)
+  function sdBox(px, py, pz, hw, hh, hd) {
+    const qx = Math.abs(px) - hw, qy = Math.abs(py) - hh, qz = Math.abs(pz) - hd;
+    return Math.hypot(Math.max(qx, 0), Math.max(qy, 0), Math.max(qz, 0))
+            + Math.min(Math.max(qx, Math.max(qy, qz)), 0);
+  }
+  const _sd = { d: 0, bIdx: -1, typ: 'face' };
+  function sdScene(px, py, pz) {
+    let d = py, bIdx = -1, typ = 'face';   // 地面 y=0
+    const cands = nearby(px, pz);        // 街区哈希:只查 3×3 邻域建筑
+    for (let k = 0; k < cands.length; k++) {
+      const b = cands[k];
+      const q = sdBox(px - b.x, py - b.h / 2, pz - b.z, b.w / 2, b.h / 2, b.d / 2);
+      if (q < d) { d = q; bIdx = b; typ = 'face'; }
+      if (b.beam) {                        // 全息光柱:从楼顶冲上天际
+        const qb = sdBox(px - b.x, py - (b.h + 11), pz - b.z, 0.6, 11, 0.6);
+        if (qb < d) { d = qb; bIdx = b; typ = 'beam'; }
+        // 柱顶全息环
+        const dxy = Math.hypot(px - b.x, pz - b.z);
+        const qr = Math.max(Math.abs(dxy - 1.8) - 0.3, Math.abs(py - (b.h + 23)) - 0.22);
+        if (qr < d) { d = qr; bIdx = b; typ = 'ring'; }
+      }
+    }
+    _sd.d = d; _sd.bIdx = bIdx; _sd.typ = typ;
+    return _sd;
+  }
+  // 数值差分法线
+  function normalAt(px, py, pz) {
+    const e = 0.06;
+    const s = sdScene;
+    const nx = s(px + e, py, pz).d - s(px - e, py, pz).d;
+    const ny = s(px, py + e, pz).d - s(px, py - e, pz).d;
+    const nz = s(px, py, pz + e).d - s(px, py, pz - e).d;
+    const l = Math.hypot(nx, ny, nz) || 1;
+    return [nx / l, ny / l, nz / l];
+  }
+
+  /* ---------------- 光线步进 ---------------- */
+  const MAX_H = 62;                        // 城市最高点,用于天空快速退出
+  const _march = { dist: -1, bIdx: -1, x: 0, y: 0, z: 0, typ: 'face' };
+  function march(ox, oy, oz, dx, dy, dz) {
+    let t = 0.08;
+    // 向下射线的硬上界:地面(y=0)
+    const tMax = dy < 0 ? Math.min(MAX_DIST, (oy - 0.02) / -dy) : MAX_DIST;
+    for (let i = 0; i < MAX_STEPS; i++) {
+      const px = ox + dx * t, py = oy + dy * t, pz = oz + dz * t;
+      if (py > MAX_H && dy > 0) break;     // 已越过天际线 → 天空
+      const s = sdScene(px, py, pz);
+      if (s.d < EPS) {
+        _march.dist = t; _march.bIdx = s.bIdx; _march.typ = s.typ;
+        _march.x = px; _march.y = py; _march.z = pz;
+        return _march;
+      }
+      t += Math.max(s.d * 0.95, 0.04);
+      if (t > tMax) break;
+    }
+    _march.dist = -1; _march.bIdx = -1;
+    return _march;
+  }
+
+  /* ---------------- 着色 ---------------- */
+  const _px = { ch: '@', r: 255, g: 255, b: 255 };
+  const _L = norm3(LIGHT);
+  const _SUN = norm3([-0.24, 0.34, 1]);     // 世界空间霓虹太阳方向
+  const SUN_A = [255, 80, 140], SUN_B = [255, 150, 200];  // 太阳亮/暗色
+
+  // 把命中结果 → 字符 + 颜色(写入 _px)
+  function shade(m, t) {
+    // 雨幕:每列一条雨丝,随时间平滑下落(无闪烁);约 2/3 的列有雨
+    const rainSeed = hash3(m.col, 9, 555);
+    const rowF = m.row / (ROWS - 1);
+    const rainPos = mod(hash3(m.col, 11, 555) + t * (0.45 + rainSeed * 0.35), 1);
+    const rainLen = 0.06 + rainSeed * 0.05;
+    const rainD = mod(rainPos - rowF, 1);
+    const rainDrop = rainSeed > 0.32 && rainD < rainLen;
+    const rainK = rainDrop ? rainD / rainLen : 0;   // 0 头部 → 1 尾部
+
+    if (m.dist < 0) {
+      skyShade(m, t, _px);
+    } else {
+      const fogF = clamp((m.dist - 15) / 105, 0, 1);
+      let r, g, b, bright;
+      if (m.bIdx < 0) {                       // —— 地面 ——
+        const gx = Math.floor(m.x / P), gz = Math.floor(m.z / P);
+        const rX = mod(m.x, P), rZ = mod(m.z, P);
+        const isMain = (gx % 4 === 3) || (gz % 4 === 3);
+        const onStreet = isMain || rX >= BLOCK || rZ >= BLOCK;
+        let cr = 36, cg = 38, cb = 58;
+        if (isMain) { cr = 58; cg = 62; cb = 92; }
+        // 主干道中央标线
+        const centerX = Math.abs(rX - P / 2) < 0.55, centerZ = Math.abs(rZ - P / 2) < 0.55;
+        if (isMain && (centerX || centerZ)) { cr = 255; cg = 209; cb = 102; }
+        // 主干道双向车流灯(沿 x 前灯 / 沿 z 尾灯)
+        if (isMain && cr < 200) {
+          if (hash3(Math.floor(m.x * 0.5 - t * 12), Math.floor(m.z * 0.5), 31) < 0.07) {
+            cr = 255; cg = 190; cb = 80;       // 前灯
+          } else if (hash3(Math.floor(m.x * 0.5), Math.floor(m.z * 0.5 - t * 12), 31) < 0.07) {
+            cr = 255; cg = 60; cb = 60;        // 尾灯
+          }
+        }
+        // 潮湿反光斑
+        if (onStreet && hash3(Math.floor(m.x * 2), Math.floor(m.z * 2), 7) > 0.82) {
+          cr = Math.min(255, cr + 58); cg = Math.min(255, cg + 62); cb = Math.min(255, cb + 80);
+        }
+        // —— 建筑投影(软阴影):把楼与地面连起来,增强立体感 ——
+        if (m.dist < 42) {
+          let shF = 1;
+          const lh = Math.hypot(_L[0], _L[2]) || 1;
+          const slx = _L[0] / lh, slz = _L[2] / lh;
+          const cands = nearby(m.x, m.z);
+          for (let k = 0; k < cands.length; k++) {
+            const b = cands[k];
+            const vx = m.x - b.x, vz = m.z - b.z;
+            const d2 = vx * vx + vz * vz;
+            const rMax = b.h * 1.05;
+            if (d2 > rMax * rMax) continue;                     // 超出投影范围
+            const dist = Math.sqrt(d2) || 1e-6;
+            const back = clamp(-(vx * slx + vz * slz) / dist, 0, 1);  // 背光侧才投影
+            const fall = 1 - dist / rMax;
+            shF = Math.min(shF, 1 - fall * back * 0.6);
+          }
+          cr *= shF; cg *= shF; cb *= shF;
+        }
+        // 街道发光网格
+        if (onStreet && cr < 200) {
+          const gx2 = mod(m.x, 3), gz2 = mod(m.z, 3);
+          if (Math.min(gx2, 3 - gx2) < 0.14 || Math.min(gz2, 3 - gz2) < 0.14) {
+            cr += 20; cg += 28; cb += 40;
+          }
+        }
+        const diff = Math.max(_L[1], 0) * 0.9 + 0.12;   // 地面法线朝上
+        r = cr * diff; g = cg * diff; b = cb * diff;
+        bright = 0.2 + diff * 0.42;
+        applyFog(r, g, b, bright, fogF, _px);
+      } else {                                // —— 建筑/光柱 ——
+        const bd = m.bIdx;
+        if (m.typ === 'beam') {
+          // 全息光柱:青白,向顶部渐隐,微脉冲
+          const frac = clamp((m.y - bd.h) / 22, 0, 1);
+          const bf = 0.95 - frac * 0.5;
+          const fl = 0.85 + 0.15 * Math.sin(t * 3 + bd.seed);
+          r = 20 + 80 * bf * fl; g = 235 * bf * fl; b = 255 * bf * fl;
+          bright = bf;
+          _px.ch = '@';
+          applyFog(r, g, b, bright, fogF, _px, true);
+        } else if (m.typ === 'ring') {
+          // 柱顶全息环:亮白青,旋转感闪烁
+          const fl = 0.7 + 0.3 * Math.sin(t * 4 + bd.seed);
+          r = 200 * fl; g = 240 * fl; b = 255 * fl;
+          bright = 0.9;
+          _px.ch = '#';
+          applyFog(r, g, b, bright, fogF, _px, true);
+        } else {
+          const lx = m.x - bd.x, lz = m.z - bd.z;
+          const hw = bd.w / 2, hd = bd.d / 2;
+          const sideX = Math.abs(lx) > Math.abs(lz);
+          const u = sideX ? (lz + hd) / (2 * hd) : (lx + hw) / (2 * hw);
+          const v = m.y / bd.h;
+          // 光照:近处用数值法线,远处用面朝向伪法线(四面明暗分明,立体感更强)
+          let diff;
+          if (m.dist < 46) {
+            const n = normalAt(m.x, m.y, m.z);
+            diff = Math.max(n[0] * _L[0] + n[1] * _L[1] + n[2] * _L[2], 0) * 0.8 + 0.26;
+          } else {
+            const fnx = sideX ? (lx > 0 ? 1 : -1) : 0;
+            const fnz = sideX ? 0 : (lz > 0 ? 1 : -1);
+            diff = 0.3 + Math.max(fnx * _L[0] + fnz * _L[2], 0) * 0.62;
+          }
+          let cr = bd.face[0], cg = bd.face[1], cb = bd.face[2];
+          r = cr; g = cg; b = cb;
+          bright = 0.2 + diff * 0.32;
+          let em = false;                    // 自发光(窗户/霓虹)不受光照影响
+
+          // —— 霓虹招牌 ——
+          const signArea = bd.sign && m.dist < 70 && !sideX && v > 0.42 && v < 0.72
+                  && u > 0.2 && u < 0.8;
+          if (signArea) {
+            const sc = bd.signColor;
+            const flick = 0.65 + 0.35 * Math.sin(t * 3.2 + bd.seed);
+            r = sc[0] * flick; g = sc[1] * flick; b = sc[2] * flick;
+            bright = 0.75;
+            // 招牌中央文字动态轮换,其余用 # 填充
+            if (Math.abs(u - 0.5) < 0.05 && Math.abs(v - 0.57) < 0.09)
+              _px.ch = SIGN_CHARS[((Math.floor(t * 1.5) + bd.seed) % SIGN_CHARS.length)];
+            else _px.ch = '#';
+            applyFog(r, g, b, bright, fogF, _px, true);
+          } else {
+            // —— 窗户 ——
+            const nw = Math.max(2, Math.floor(bd.w / 2.1));
+            const nh = Math.max(3, Math.floor(bd.h / 2.5));
+            const fu = Math.floor(u * nw), fv = Math.floor(v * nh);
+            const cu = u * nw - fu, cv = v * nh - fv;
+            const inWin = cu > 0.12 && cu < 0.82 && cv > 0.12 && cv < 0.88;
+            if (inWin && m.dist < 72) {       // 近处:细窗格
+              if (hash3(fu, fv, bd.seed) < bd.density) {
+                const wc = bd.winColor;
+                let f = 1;
+                // 少数窗户闪烁
+                if (hash3(fu, fv, bd.seed + 77) > 0.82)
+                  f = 0.5 + 0.5 * Math.sin(t * 7 + fu * 5 + fv * 3);
+                r = wc[0] * f; g = wc[1] * f; b = wc[2] * f;
+                bright = 0.85; em = true;
+              } else {                        // 暗玻璃
+                r = bd.face[0] * 0.28 + bd.winColor[0] * 0.1;
+                g = bd.face[1] * 0.28 + bd.winColor[1] * 0.1;
+                b = bd.face[2] * 0.28 + bd.winColor[2] * 0.1;
+                bright = 0.22;
+              }
+            } else if (inWin && hash3(fu, fv, bd.seed) < bd.density * 0.8) {
+              const wc = bd.winColor;         // 远处:随机窗点
+              r = wc[0]; g = wc[1]; b = wc[2]; bright = 0.7; em = true;
+            }
+
+            // —— 楼层霓虹横线(非窗口区) ——
+            const band = Math.abs(mod(v * 4, 1) - 0.06) < 0.035;
+            if (band && !inWin && m.dist < 70) {
+              const bf = 0.55 + 0.45 * Math.sin(t * 3.5 + bd.seed % 11);
+              r = bd.neon[0] * bf; g = bd.neon[1] * bf; b = bd.neon[2] * bf;
+              bright = 0.85; em = true;
+            }
+
+            // —— 顶部霓虹条 ——
+            if (v > 0.9) {
+              const seg = hash3(fu, 991, bd.seed) > 0.22;   // 分段缺口
+              const flick = 0.55 + 0.45 * Math.sin(t * 2.6 + bd.seed % 9);
+              const nc = bd.neon;
+              r = nc[0] * flick * (seg ? 1 : 0.4);
+              g = nc[1] * flick * (seg ? 1 : 0.4);
+              b = nc[2] * flick * (seg ? 1 : 0.4);
+              bright = seg ? 0.92 : 0.3; em = true;
+            }
+            if (!em) {
+              // 霓虹描边:建筑垂直边缘 + 顶部一圈细霓虹线(混合而非覆盖)
+              const eU = Math.min(u, 1 - u) * 50;
+              const eV = v > 0.96 ? (v - 0.96) * 120 : 99;
+              if (Math.min(eU, eV) < 1.0 && m.dist < 75) {
+                const fl = 0.7 + 0.3 * Math.sin(t * 3 + bd.seed);
+                r = lerp(r, bd.neon[0] * fl, 0.9);
+                g = lerp(g, bd.neon[1] * fl, 0.9);
+                b = lerp(b, bd.neon[2] * fl, 0.9);
+                bright = 0.9; em = true;
+              }
+            }
+            if (!em) {
+              // 墙面:基础色随光照微调但保持鲜艳 + 楼层色差 + 弱霓虹染色 + 边缘AO
+              const ao = 0.8 + 0.2 * Math.min(Math.min(u, 1 - u, v, 1 - v) * 6, 1);
+              const flT = 0.88 + hash3(Math.floor(v * nh), bd.seed, 777) * 0.24;
+              const sh = 0.42 + 0.58 * diff;
+              const nT = clamp(diff, 0.2, 1) * 0.45;
+              r = (bd.face[0] * sh + 20) * ao * flT + bd.neon[0] * nT * 0.14;
+              g = (bd.face[1] * sh + 18) * ao * flT + bd.neon[1] * nT * 0.14;
+              b = (bd.face[2] * sh + 38) * ao * flT + bd.neon[2] * nT * 0.14;
+            }
+            applyFog(r, g, b, bright, fogF, _px);
+          }
+        }
+      }
+    }
+    // 雨幕叠加:霓虹雨丝(头亮尾淡,带拖尾立体感);代码雨格与近处建筑保留细节
+    if (rainDrop) {
+      const depthF = m.dist < 0 ? 1 : clamp((m.dist - 25) / 45, 0, 1);
+      if (depthF > 0.03 && !(m.dist < 0 && codeRain(m, t))) {
+        const zenithF = 1 - rowF;            // 天顶(近)雨丝更亮,地平线(远)更淡
+        const rc = RAIN_COLORS[(rainSeed * RAIN_COLORS.length) | 0];
+        const lv = (1 - rainK) * (1 - rainK);
+        const mix = (0.32 + 0.42 * zenithF) * depthF * (0.35 + 0.65 * lv);
+        _px.ch = zenithF > 0.55 ? '|' : zenithF > 0.25 ? ':' : '\'';
+        _px.r = _px.r * (1 - mix) + rc[0] * mix;
+        _px.g = _px.g * (1 - mix) + rc[1] * mix;
+        _px.b = _px.b * (1 - mix) + rc[2] * mix;
+      }
+    }
+    return _px;
+  }
+
+  // keepCh:招牌/光柱的字符不被亮度表覆盖
+  function applyFog(r, g, b, bright, fogF, px, keepCh) {
+    px.r = lerp(r, FOG[0], fogF);
+    px.g = lerp(g, FOG[1], fogF);
+    px.b = lerp(b, FOG[2], fogF);
+    if (!keepCh) px.ch = RAMP[clamp(Math.round(lerp(bright, 0.1, fogF) * (RAMP.length - 1)), 0, RAMP.length - 1)];
+    return px;
+  }
+
+  // 代码雨:每列一条霓虹字符流,头部亮白、尾部渐暗,随时间下落
+  function codeRain(m, t) {
+    const rowF = m.row / (ROWS - 1);
+    if (m.dy < 0.05) return null;                     // 地平线以下不显示
+    if (hash3(m.col, 4242, 1) > 0.6) return null;     // 约四成列有代码雨
+    const phase = hash3(m.col, 4243, 1);
+    const speed = 0.22 + hash3(m.col, 4244, 1) * 0.18;
+    const head = mod(phase + t * speed, 1.12);
+    const dHead = mod(head - rowF, 1.12);
+    const tail = 0.11;                                // 雨尾长度(行比例)
+    if (dHead >= tail) return null;
+    const k = dHead / tail;                           // 0 头 → 1 尾
+    const rc = RAIN_COLORS[(hash3(m.col, 4245, 1) * RAIN_COLORS.length) | 0];
+    const ci = Math.floor(hash3(m.col, m.row + Math.floor(t * 26), 9) * MATRIX_CHARS.length);
+    const lv = (1 - k) * (1 - k);
+    return { ch: MATRIX_CHARS[ci], r: k < 0.28 ? 235 : rc[0] * lv, g: k < 0.28 ? 255 : rc[1] * lv, b: k < 0.28 ? 255 : rc[2] * lv };
+  }
+
+  // 天空:夜间渐变(天顶深靛蓝 → 地平线品红辉光) + 霓虹太阳(经典合成波切条) + 代码雨
+  function skyShade(m, t, px) {
+    const cr = codeRain(m, t);
+    if (cr) { px.ch = cr.ch; px.r = cr.r; px.g = cr.g; px.b = cr.b; return px; }
+    const rowF = m.row / (ROWS - 1);
+    const g = clamp(rowF / 0.5, 0, 1);             // 0 天顶 → 1 地平线
+    const g2 = g * g;
+    let r = lerp(lerp(8, 24, g), 110, g2 * 0.45);
+    let gg = lerp(lerp(7, 16, g), 50, g2 * 0.45);
+    let b = lerp(lerp(26, 52, g), 130, g2 * 0.45);
+    // 霓虹太阳:世界固定方向,带横向切条(小盘)
+    const nd = m.dx * _SUN[0] + m.dy * _SUN[1] + m.dz * _SUN[2];
+    if (nd > 0.985) {
+      const k = clamp((nd - 0.985) / 0.015, 0, 1);
+      if (mod(rowF * 30, 1) > 0.3) {
+        r = lerp(r, SUN_A[0], k); gg = lerp(gg, SUN_A[1], k); b = lerp(b, SUN_A[2], k);
+      } else {
+        r = lerp(r, SUN_B[0], k * 0.45); gg = lerp(gg, SUN_B[1], k * 0.45); b = lerp(b, SUN_B[2], k * 0.45);
+      }
+    }
+    px.ch = '█';
+    px.r = r; px.g = gg; px.b = b;
+    return px;
+  }
+
+  /* ---------------- 渲染 ---------------- */
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  let COLS = 128, ROWS = 48;
+  const cam = { x: GRID / 2 * P, y: EYE, z: GRID / 2 * P, yaw: 0.7, pitch: 0.06, vx: 0, vz: 0, vy: 0 };
+
+  function setRes(cols, rows) {
+    COLS = cols; ROWS = rows;
+    canvas.width = COLS * CELL_W;
+    canvas.height = ROWS * CELL_H;
+  }
+
+  function render(t) {
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.font = CELL_H + 'px monospace';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+
+    const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
+    const cy = Math.cos(cam.yaw), sy = Math.sin(cam.yaw);
+    // 相机基向量
+    const fx = sy * cp, fy = sp, fz = cy * cp;              // 前
+    const rx = cy, ry = 0, rz = -sy;                        // 右
+    const ux = -sy * sp, uy = cp, uz = -cy * sp;            // 上
+    const tanF = Math.tan(FOV / 2);
+    const aspect = CELL_H / CELL_W;
+
+    for (let row = 0; row < ROWS; row++) {
+      // 屏幕 y 向下增长,取反:顶行(row=0)射线朝上
+      const vf = (0.5 - row / (ROWS - 1)) * 2;
+      for (let col = 0; col < COLS; col++) {
+        const hf = (col / (COLS - 1) - 0.5) * 2;
+        // 射线方向
+        let dx = rx * (hf * tanF) + ux * (vf * tanF * aspect) + fx;
+        let dy = ry * (hf * tanF) + uy * (vf * tanF * aspect) + fy;
+        let dz = rz * (hf * tanF) + uz * (vf * tanF * aspect) + fz;
+        const il = 1 / (Math.hypot(dx, dy, dz) || 1);
+        dx *= il; dy *= il; dz *= il;
+
+        _march.dx = dx; _march.dy = dy; _march.dz = dz;
+        _march.col = col; _march.row = row;
+        const m = march(cam.x, cam.y, cam.z, dx, dy, dz);
+        const p = shade(m, t);
+        // 全局曝光:轻微抬升,避免黑死
+        p.r = Math.min(255, p.r * 1.05 + 5);
+        p.g = Math.min(255, p.g * 1.05 + 5);
+        p.b = Math.min(255, p.b * 1.05 + 7);
+
+        const x = col * CELL_W + CELL_W / 2;
+        const y = row * CELL_H + CELL_H / 2;
+        ctx.fillStyle = 'rgb(' + (p.r | 0) + ',' + (p.g | 0) + ',' + (p.b | 0) + ')';
+        ctx.fillText(p.ch, x, y);
+      }
+    }
+  }
+
+  /* ---------------- 输入 ---------------- */
+  const keys = {};
+  addEventListener('keydown', e => {
+    keys[e.code] = true;
+    if (['Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyC'].includes(e.code)) e.preventDefault();
+  });
+  addEventListener('keyup', e => keys[e.code] = false);
+
+  let dragging = false, lastMX = 0, lastMY = 0;
+  canvas.addEventListener('mousedown', e => {
+    if (document.pointerLockElement) return;
+    dragging = true; lastMX = e.clientX; lastMY = e.clientY;
+  });
+  addEventListener('mouseup', () => dragging = false);
+  addEventListener('mousemove', e => {
+    if (document.pointerLockElement) {
+      cam.yaw += e.movementX * 0.0022;
+      cam.pitch = clamp(cam.pitch - e.movementY * 0.0022, -1.15, 1.15);
+    } else if (dragging) {
+      cam.yaw += (e.clientX - lastMX) * 0.004;
+      cam.pitch = clamp(cam.pitch - (e.clientY - lastMY) * 0.004, -1.15, 1.15);
+      lastMX = e.clientX; lastMY = e.clientY;
+    }
+  });
+  canvas.addEventListener('click', () => {
+    if (!document.pointerLockElement && canvas.requestPointerLock) canvas.requestPointerLock();
+  });
+  const overlay = document.getElementById('overlay');
+  overlay.addEventListener('click', () => {
+    overlay.style.display = 'none';
+    if (canvas.requestPointerLock) canvas.requestPointerLock();
+  });
+
+  /* ---------------- 移动与碰撞 ---------------- */
+  function blocked(px, pz) {
+    const c = nearby(px, pz);
+    for (let i = 0; i < c.length; i++) {
+      const b = c[i];
+      if (cam.y < b.h && Math.abs(px - b.x) < b.w / 2 + 0.35 && Math.abs(pz - b.z) < b.d / 2 + 0.35) return true;
+    }
+    return false;
+  }
+
+  function update(dt) {
+    const run = keys['ShiftLeft'] || keys['ShiftRight'];
+    const spd = run ? 12 : 6.5;
+    let ix = 0, iz = 0;
+    if (keys['KeyW']) { ix += Math.sin(cam.yaw); iz += Math.cos(cam.yaw); }
+    if (keys['KeyS']) { ix -= Math.sin(cam.yaw); iz -= Math.cos(cam.yaw); }
+    if (keys['KeyA']) { ix += Math.cos(cam.yaw); iz -= Math.sin(cam.yaw); }
+    if (keys['KeyD']) { ix -= Math.cos(cam.yaw); iz += Math.sin(cam.yaw); }
+    const il = Math.hypot(ix, iz) || 1;
+    ix = ix / il * spd; iz = iz / il * spd;
+
+    const k = 1 - Math.exp(-10 * dt);         // 加速度平滑
+    cam.vx = lerp(cam.vx, ix, k);
+    cam.vz = lerp(cam.vz, iz, k);
+
+    let nx = cam.x + cam.vx * dt, nz = cam.z + cam.vz * dt;
+    if (blocked(nx, cam.z)) nx = cam.x;       // 分轴回退,允许贴墙滑动
+    if (blocked(cam.x, nz)) nz = cam.z;
+    cam.x = nx; cam.z = nz;
+
+    const ty = (keys['Space'] ? 5 : 0) + (keys['KeyC'] ? -5 : 0);
+    cam.vy = lerp(cam.vy, ty, k);
+    cam.y = clamp(cam.y + cam.vy * dt, 1.0, 58);
+  }
+
+  /* ---------------- 主循环 / UI ---------------- */
+  const hud = document.getElementById('hud');
+  let frames = 0, fpsAcc = 0, fpsAvg = 60;
+  let last = performance.now();
+
+  function frame(now) {
+    const dt = Math.min((now - last) / 1000, 0.05);
+    last = now;
+    update(dt);
+    render(now / 1000);
+
+    frames++; fpsAcc += dt;
+    if (fpsAcc >= 0.5) {
+      fpsAvg = frames / fpsAcc;
+      frames = 0; fpsAcc = 0;
+      hud.textContent = 'FPS ' + fpsAvg.toFixed(0)
+              + '  ' + COLS + 'x' + ROWS
+              + '  x' + cam.x.toFixed(0) + ' z' + cam.z.toFixed(0) + ' y' + cam.y.toFixed(1);
+      // 动态分辨率:帧率低降档,高回档
+      if (fpsAvg < 26 && COLS > 80) setRes(COLS - 16, Math.round((COLS - 16) * 0.375));
+      else if (fpsAvg > 54 && COLS < 128) setRes(COLS + 16, Math.round((COLS + 16) * 0.375));
+    }
+    requestAnimationFrame(frame);
+  }
+
+  /* ---------------- 启动 ---------------- */
+  setRes(128, 48);
+  requestAnimationFrame(frame);
+</script>
+</body>
+</html>

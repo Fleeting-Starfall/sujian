@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>关注/粉丝 - 素见</title>
+<link rel="stylesheet" href="/css/colors_and_type.css">
+<link rel="stylesheet" href="/css/components.css">
+<link rel="stylesheet" href="/css/app.css">
+<style>
+.fu-page { max-width: 640px; margin: 0 auto; }
+.fu-head { display: flex; align-items: center; gap: var(--space-4); margin: var(--space-4) 0 var(--space-5); }
+.fu-head h2 { font-size: var(--font-size-h2); }
+.fu-list { display: flex; flex-direction: column; gap: var(--space-3); }
+.fu-item { display: flex; align-items: center; gap: var(--space-4); background: var(--color-bg-white); border-radius: var(--radius-md); box-shadow: var(--shadow-1); padding: var(--space-4); cursor: pointer; transition: box-shadow .15s; }
+.fu-item:hover { box-shadow: var(--shadow-3); }
+.fu-item .fu-info { flex: 1; min-width: 0; }
+.fu-item .fu-info .name { font-weight: var(--font-weight-medium); }
+.fu-item .fu-info .bio { font-size: var(--font-size-body); color: var(--color-text-3); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+</style>
+</head>
+<body>
+<header id="topnav" class="app-topnav"></header>
+
+<div class="container">
+  <div class="fu-page">
+    <div class="fu-head">
+      <a class="btn btn-outline btn-sm" id="back-link">← 返回主页</a>
+      <h2 id="fu-title">关注</h2>
+    </div>
+    <div class="fu-list" id="fu-list"></div>
+  </div>
+</div>
+
+<script src="/js/app.js"></script>
+<script>
+'use strict';
+const uid = getQuery('u');
+const type = getQuery('t') === 'followers' ? 'followers' : 'following';
+
+async function render() {
+  const me = await renderTopNav();
+  document.getElementById('back-link').href = '/profile?u=' + encodeURIComponent(uid);
+  document.getElementById('fu-title').textContent = type === 'followers' ? '粉丝' : '关注';
+  const list = await api('/api/user/' + uid + '/' + type);
+  const box = document.getElementById('fu-list');
+  if (!list || list.length === 0) {
+    box.innerHTML = '<div class="empty-state"><div class="big">' + ICON.eye + '</div>还没有' + (type === 'followers' ? '粉丝' : '关注的人') + '</div>';
+    return;
+  }
+  box.innerHTML = list.map(u => {
+    const isSelf = u.user.id === me.id;
+    return '<div class="fu-item" onclick="location.href=\'/profile?u=' + esc(u.user.id) + '\'">' +
+      avatarHTML(u.user.nickname, u.user.avatar, 'medium') +
+      '<div class="fu-info"><div class="name">' + esc(u.user.nickname) + (u.user.role === 'admin' ? ' <span class="status-tag status-tag-processing status-tag-text" style="font-size:11px;">管理员</span>' : '') + '</div>' +
+      '<div class="bio">' + esc(u.user.bio || '这个人很懒，什么都没写～') + '</div></div>' +
+      (isSelf ? '' : '<button class="btn ' + (u.following ? 'btn-outline' : 'btn-primary') + ' btn-sm" data-uid="' + u.user.id + '" data-following="' + u.following + '" onclick="event.stopPropagation();toggle(this)">' + (u.following ? '已关注' : '+ 关注') + '</button>') +
+      '</div>';
+  }).join('');
+}
+
+window.toggle = async btn => {
+  try {
+    const r = await api('/api/user/' + btn.dataset.uid + '/follow', { method: 'POST', body: {} });
+    btn.dataset.following = r.following;
+    btn.textContent = r.following ? '已关注' : '+ 关注';
+    btn.classList.toggle('btn-primary', !r.following);
+    btn.classList.toggle('btn-outline', r.following);
+  } catch (e) { toast(e.message, true); }
+};
+
+(async function init() {
+  if (!uid) { location.href = '/'; return; }
+  try { await render(); } catch (e) { location.href = '/login'; }
+})();
+</script>
+</body>
+</html>

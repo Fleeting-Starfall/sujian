@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>消息 - 素见</title>
+<link rel="stylesheet" href="/css/colors_and_type.css">
+<link rel="stylesheet" href="/css/components.css">
+<link rel="stylesheet" href="/css/app.css">
+<style>
+.nt-page { max-width: 720px; margin: 0 auto; }
+.nt-head { display: flex; align-items: center; justify-content: space-between; margin: var(--space-4) 0 var(--space-5); }
+.nt-list { display: flex; flex-direction: column; gap: var(--space-3); }
+.nt-item { display: flex; gap: var(--space-3); align-items: flex-start; background: var(--color-bg-white); border-radius: var(--radius-md); box-shadow: var(--shadow-1); padding: var(--space-4); cursor: pointer; transition: box-shadow .15s; }
+.nt-item:hover { box-shadow: var(--shadow-3); }
+.nt-item.unread { background: var(--primary-1); }
+.nt-item .nt-icon { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.nt-item .nt-body { flex: 1; min-width: 0; }
+.nt-item .nt-text { font-size: var(--font-size-h4); color: var(--color-text-1); line-height: 20px; }
+.nt-item .nt-text b { font-weight: 600; }
+.nt-item .nt-time { font-size: var(--font-size-body); color: var(--color-text-3); margin-top: 3px; }
+.nt-item .nt-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--danger-5); flex-shrink: 0; margin-top: 6px; }
+.nt-item.read .nt-dot { visibility: hidden; }
+</style>
+</head>
+<body>
+<header id="topnav" class="app-topnav"></header>
+
+<div class="container">
+  <div class="nt-page">
+    <div class="nt-head">
+      <h2 style="font-size: var(--font-size-h2);">消息</h2>
+      <button class="btn btn-outline btn-sm" id="read-all">全部已读</button>
+    </div>
+    <div class="nt-list" id="nt-list"></div>
+  </div>
+</div>
+
+<script src="/js/app.js"></script>
+<script>
+'use strict';
+
+const ICONS = {
+  like:    ['#ff6f91', '<svg width="17" height="17" viewBox="0 0 16 16" fill="#fff"><path d="M8 14s-5.5-3.2-5.5-7a3 3 0 0 1 5.5-1.7A3 3 0 0 1 13.5 7c0 3.8-5.5 7-5.5 7z"/></svg>'],
+  fav:     ['#f5b433', '<svg width="17" height="17" viewBox="0 0 16 16" fill="#fff"><path d="M8 2.5 9.8 6l4 .6-2.9 2.8.7 4L8 11.8 4.4 13.4l.7-4L2.2 6.6 6.2 6 8 2.5z"/></svg>'],
+  comment: ['#1664ff', '<svg width="17" height="17" viewBox="0 0 16 16" fill="#fff"><path d="M2.8 3.4h10.4v7.2H6.6L3.6 13.4V10.6H2.8V3.4z"/></svg>'],
+  commentLike: ['#ff6f91', '<svg width="17" height="17" viewBox="0 0 16 16" fill="#fff"><path d="M8 14s-5.5-3.2-5.5-7a3 3 0 0 1 5.5-1.7A3 3 0 0 1 13.5 7c0 3.8-5.5 7-5.5 7z"/></svg>'],
+  reply:   ['#2a814b', '<svg width="17" height="17" viewBox="0 0 16 16" fill="#fff"><path d="M13 2.8H3a1 1 0 0 0-1 1v7.4a1 1 0 0 0 1 1h3.2l2.3 2.6V12.2H13a1 1 0 0 0 1-1V3.8a1 1 0 0 0-1-1z"/></svg>'],
+  follow:  ['#6e4c9f', '<svg width="17" height="17" viewBox="0 0 16 16" fill="#fff"><circle cx="8" cy="5.2" r="2.6"/><path d="M2.8 13.5c.5-2.8 2.8-4 5.2-4s4.7 1.2 5.2 4"/></svg>'],
+  friend:  ['#6e4c9f', '<svg width="17" height="17" viewBox="0 0 16 16" fill="#fff"><circle cx="8" cy="5.2" r="2.6"/><path d="M2.8 13.5c.5-2.8 2.8-4 5.2-4s4.7 1.2 5.2 4"/><circle cx="12.4" cy="4.6" r="1.8"/><path d="M10.6 13.5c.2-2 1.1-3 2.4-3s2.2 1 2.4 3"/></svg>'],
+  friendAccepted: ['#2a814b', '<svg width="17" height="17" viewBox="0 0 16 16" fill="#fff"><circle cx="8" cy="5.2" r="2.6"/><path d="M2.8 13.5c.5-2.8 2.8-4 5.2-4s4.7 1.2 5.2 4"/><path d="m10.6 8.6 1 1 2-2.2"/></svg>'],
+  approve: ['#2a9d5f', '<svg width="17" height="17" viewBox="0 0 16 16" fill="#fff"><path d="M8 1.8 13.2 4v4.2c0 3.4-2.3 5.5-5.2 6-2.9-.5-5.2-2.6-5.2-6V4L8 1.8z"/><path d="m5.6 8.2 1.6 1.6 3-3.4"/></svg>'],
+  reject: ['#e5484d', '<svg width="17" height="17" viewBox="0 0 16 16" fill="#fff"><path d="M8 1.8 13.2 4v4.2c0 3.4-2.3 5.5-5.2 6-2.9-.5-5.2-2.6-5.2-6V4L8 1.8z"/><path d="m6 6.2 4 4m0-4-4 4"/></svg>']
+};
+
+function ntText(n) {
+  const who = '<b>' + esc(n.actorName) + '</b>';
+  const title = n.noteTitle ? '《' + esc(n.noteTitle) + '》' : '';
+  switch (n.type) {
+    case 'like':    return who + ' 赞了你的笔记 ' + title;
+    case 'fav':     return who + ' 收藏了你的笔记 ' + title;
+    case 'comment': return who + ' 评论了你的笔记 ' + title;
+    case 'commentLike': return who + ' 赞了你的评论 ' + (title ? '(' + title + ')' : '');
+    case 'reply':   return who + ' 回复了你的评论 ' + (title ? '(' + title + ')' : '');
+    case 'follow':  return who + ' 关注了你';
+    case 'friend':  return who + ' 请求添加你为好友';
+    case 'friendAccepted': return who + ' 接受了你的好友请求，你们已成为好友';
+    case 'approve': return '你的笔记 ' + title + ' 已通过审核';
+    case 'reject':  return '你的笔记 ' + title + ' 未通过审核，已被驳回';
+    default: return who + ' 有新的动态';
+  }
+}
+
+function ntHref(n) {
+  if (n.type === 'follow') return '/profile?u=' + esc(n.actorId);
+  if (n.type === 'friend' || n.type === 'friendAccepted') return '/friends';
+  if (n.noteId) return '/note?id=' + esc(n.noteId);
+  return '/notifications';
+}
+
+async function markRead(n, el) {
+  if (!n.read) {
+    await api('/api/notifications/' + n.id + '/read', { method: 'POST', body: {} });
+    n.read = true;
+    if (el) { el.classList.remove('unread'); el.classList.add('read'); }
+  }
+}
+
+async function render() {
+  const d = await api('/api/notifications');
+  const list = document.getElementById('nt-list');
+  if (!d.items || d.items.length === 0) {
+    list.innerHTML = '<div class="empty-state"><div class="big">' + ICON.notification + '</div>还没有消息</div>';
+    return;
+  }
+  list.innerHTML = d.items.map(n => {
+    const [bg, icon] = ICONS[n.type] || ICONS.comment;
+    return '<div class="nt-item' + (n.read ? ' read' : ' unread') + '" data-id="' + n.id + '">' +
+      '<div class="nt-icon" style="background:' + bg + ';">' + icon + '</div>' +
+      '<div class="nt-body"><div class="nt-text">' + ntText(n) + '</div><div class="nt-time">' + fmtTime(n.createdAt) + '</div></div>' +
+      '<div class="nt-dot"></div></div>';
+  }).join('');
+  list.querySelectorAll('.nt-item').forEach(el => {
+    el.addEventListener('click', async () => {
+      const n = d.items.find(x => x.id === el.dataset.id);
+      await markRead(n, el);
+      location.href = ntHref(n);
+    });
+  });
+}
+
+document.getElementById('read-all').addEventListener('click', async () => {
+  await api('/api/notifications/read', { method: 'POST', body: {} });
+  document.querySelectorAll('.nt-item').forEach(el => { el.classList.remove('unread'); el.classList.add('read'); });
+  toast('已全部标记为已读');
+  renderTopNav(); // 刷新顶栏铃铛未读红点
+});
+
+(async function init() {
+  try { await renderTopNav(); } catch (e) { location.href = '/login'; return; }
+  render();
+})();
+</script>
+</body>
+</html>

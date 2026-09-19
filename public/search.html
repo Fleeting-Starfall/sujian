@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>搜索 - 素见</title>
+<link rel="stylesheet" href="/css/colors_and_type.css">
+<link rel="stylesheet" href="/css/components.css">
+<link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+<header id="topnav" class="app-topnav"></header>
+
+<div class="container">
+  <div class="search-bar" style="display:flex; gap:var(--space-3); margin-bottom: var(--space-5);">
+    <input type="search" id="kw" placeholder="搜索笔记标题、标签、作者或用户号…"
+      style="flex:1; height:40px; border:1px solid var(--color-border-3); border-radius: var(--radius-md); padding: 0 16px; font-size: var(--font-size-h4); outline:none;">
+    <button class="btn btn-primary btn-md" style="height:40px; padding:0 24px;" onclick="doSearch()">搜索</button>
+  </div>
+
+  <!-- 空搜索态：热门标签 + 历史 -->
+  <div id="empty-panel" style="display:none;">
+    <section class="search-section">
+      <h3 class="search-section-title">🔥 热门标签</h3>
+      <div id="hot-tags" class="tag-chips"><span class="search-muted">加载中…</span></div>
+    </section>
+    <section class="search-section" id="history-section" style="display:none;">
+      <div class="search-section-head">
+        <h3 class="search-section-title">🕘 搜索历史</h3>
+        <button class="link-btn" id="clear-history">清空</button>
+      </div>
+      <div id="history-list" class="tag-chips"></div>
+    </section>
+  </div>
+
+  <div style="color:var(--color-text-3); margin-bottom: var(--space-4);" id="result-info"></div>
+  <div id="user-results" style="display:none; margin-bottom: var(--space-5);"></div>
+  <div class="app-feed" id="feed"></div>
+  <div style="text-align:center; padding: 20px 0 40px;">
+    <button class="btn btn-outline btn-md" id="load-more" style="display:none">加载更多</button>
+  </div>
+</div>
+
+<script src="/js/masonry.js"></script>
+<script src="/js/app.js"></script>
+<script>
+'use strict';
+const kw = document.getElementById('kw');
+kw.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+
+function doSearch() {
+  const q = kw.value.trim();
+  if (!q) return;
+  pushSearchHistory(q);
+  location.href = '/search?q=' + encodeURIComponent(q);
+}
+
+/* 搜索历史（本页渲染，push 复用 app.js 全局） */
+function getHistory() {
+  try { return JSON.parse(localStorage.getItem('sujian-search-history')) || []; } catch (e) { return []; }
+}
+function removeHistory(q) {
+  const h = getHistory().filter(x => x !== q);
+  try { localStorage.setItem('sujian-search-history', JSON.stringify(h)); } catch (e) {}
+  renderHistory();
+}
+function clearHistory() {
+  try { localStorage.removeItem('sujian-search-history'); } catch (e) {}
+  renderHistory();
+}
+function escAttr(s) { return String(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+function renderHistory() {
+  const h = getHistory();
+  const sec = document.getElementById('history-section');
+  const list = document.getElementById('history-list');
+  if (!h.length) { sec.style.display = 'none'; return; }
+  sec.style.display = '';
+  list.innerHTML = h.map(q =>
+    '<span class="tag-chip" data-q="' + escAttr(q) + '">' + esc(q) +
+    ' <span class="tag-chip-x" data-del="' + escAttr(q) + '" title="删除">×</span></span>'
+  ).join('');
+}
+function renderHotTags() {
+  const box = document.getElementById('hot-tags');
+  fetch('/api/tags').then(r => r.ok ? r.json() : []).then(arr => {
+    if (!arr || !arr.length) { box.innerHTML = '<span class="search-muted">暂无热门标签</span>'; return; }
+    box.innerHTML = arr.map(t =>
+      '<a class="tag-chip tag-chip-hot" href="/tag?tag=' + encodeURIComponent(t.tag) + '">#' + esc(t.tag) +
+      ' <span class="tag-count">' + t.count + '</span></a>'
+    ).join('');
+  }).catch(() => { box.innerHTML = '<span class="search-muted">暂无热门标签</span>'; });
+}
+
+document.getElementById('history-list').addEventListener('click', e => {
+  const del = e.target.getAttribute('data-del');
+  if (del !== null) { e.stopPropagation(); removeHistory(del); return; }
+  const chip = e.target.closest('.tag-chip');
+  if (chip && chip.dataset.q) location.href = '/search?q=' + encodeURIComponent(chip.dataset.q);
+});
+document.getElementById('clear-history').addEventListener('click', clearHistory);
+
+async function renderUsers(q) {
+  const box = document.getElementById('user-results');
+  let users = [];
+  try { users = await api('/api/users/search?q=' + encodeURIComponent(q)); } catch (e) { return; }
+  if (!users || users.length === 0) { box.style.display = 'none'; return; }
+  box.style.display = 'block';
+  box.innerHTML = '<div style="font-size: var(--font-size-h3); font-weight:600; margin-bottom: var(--space-3);">用户</div>' +
+    '<div class="panel" style="padding: var(--space-2) 0;">' +
+    users.map(u => '<div style="display:flex; align-items:center; gap:var(--space-3); padding: var(--space-3) var(--space-4); border-bottom:1px solid var(--color-border-2); cursor:pointer;" onclick="location.href=\'/profile?u=' + esc(u.id) + '\'">' +
+      avatarHTML(u.nickname, u.avatar) +
+      '<div style="flex:1; min-width:0;">' +
+      '  <div style="font-weight:500; color:var(--color-text-1);">' + esc(u.nickname) +
+      (u.role === 'admin' ? ' <span style="font-size:12px; color:var(--primary-6); border:1px solid var(--primary-6); border-radius:999px; padding:0 6px;">管理员</span>' : '') +
+      (u.officialVerified ? ' <span style="font-size:12px; color:#1664FF; border:1px solid #1664FF; border-radius:999px; padding:0 6px;">官方</span>' : '') +
+      '</div>' +
+      '  <div style="font-size:var(--font-size-body); color:var(--color-text-3);">@' + esc(u.username) + ' · 用户号 <b style="font-family:monospace; letter-spacing:1px;">' + esc(u.uid || '—') + '</b></div>' +
+      '</div>' +
+      '<span style="color:var(--primary-6); font-size:var(--font-size-body);">查看主页</span>' +
+      '</div>').join('') +
+    '</div>';
+}
+
+(async function init() {
+  try { await renderTopNav(); } catch (e) { location.href = '/login'; return; }
+  const q = getQuery('q');
+  const emptyPanel = document.getElementById('empty-panel');
+  const resultInfo = document.getElementById('result-info');
+  const feed = document.getElementById('feed');
+  if (!q) {
+    emptyPanel.style.display = '';
+    resultInfo.style.display = 'none';
+    feed.style.display = 'none';
+    document.getElementById('user-results').style.display = 'none';
+    renderHotTags();
+    renderHistory();
+    kw.addEventListener('input', () => {
+      emptyPanel.style.display = kw.value.trim() ? 'none' : '';
+    });
+    return;
+  }
+  emptyPanel.style.display = 'none';
+  kw.value = q;
+  await renderUsers(q);
+  const moreBtn = document.getElementById('load-more');
+  let page = 0, hasMore = false, reqId = 0;
+
+  async function load(reset) {
+    const rid = ++reqId;
+    const d = await api('/api/feed?q=' + encodeURIComponent(q) + '&page=' + page);
+    if (rid !== reqId) return; // 丢弃过期响应
+    if (reset) {
+      renderFeed(feed, d.items, '没有找到相关笔记，换个关键词试试');
+    } else {
+      appendFeed(feed, d.items); // 新卡片落入最短列
+    }
+    hasMore = !!d.hasMore;
+    moreBtn.style.display = hasMore ? '' : 'none';
+    resultInfo.textContent = '笔记共 ' + d.total + ' 条结果';
+  }
+
+  moreBtn.addEventListener('click', async function () {
+    this.disabled = true; this.textContent = '加载中…';
+    page++;
+    try { await load(false); } catch (e) { toast(e.message, true); page--; }
+    this.disabled = false; this.textContent = '加载更多';
+  });
+
+  try {
+    await load(true);
+  } catch (e) {
+    feed.innerHTML = '<div class="empty-state"><div class="big">' + ICON.alert + '</div>' + esc(e.message) + '</div>';
+  }
+})();
+</script>
+</body>
+</html>

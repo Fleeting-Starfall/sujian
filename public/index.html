@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>素见 - 发现</title>
+<link rel="stylesheet" href="/css/colors_and_type.css">
+<link rel="stylesheet" href="/css/components.css">
+<link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+<header id="topnav" class="app-topnav"></header>
+
+<div class="container">
+  <div class="channel-bar" id="channel-bar"></div>
+  <div class="feed-caption" id="feed-caption"></div>
+  <div class="app-feed" id="feed"></div>
+  <div style="text-align:center; padding: 20px 0 40px;">
+    <button class="btn btn-outline btn-md" id="load-more" style="display:none">加载更多</button>
+  </div>
+</div>
+
+<script src="/js/masonry.js"></script>
+<script src="/js/app.js"></script>
+<script>
+'use strict';
+const CHANNELS = ['推荐', '关注', '穿搭', '美食', '旅行', '数码', '家居', '学习', '健身', '萌宠', '影视', '游戏', '生活'];
+let curCat = '推荐', curTab = '', curPage = 0, curSort = 'hot', feedReqId = 0;
+
+async function loadFeed(reset) {
+  const reqId = ++feedReqId;
+  if (reset) { curPage = 0; document.getElementById('feed').innerHTML = '<div class="empty-state"><div class="big">' + ICON.clock + '</div>加载中…</div>'; }
+  const params = new URLSearchParams();
+  if (curTab === 'follow') params.set('tab', 'follow');
+  else if (curCat !== '推荐') params.set('category', curCat);
+  params.set('sort', curSort);
+  params.set('page', curPage);
+  let data;
+  try {
+    data = await api('/api/feed?' + params.toString());
+  } catch (e) {
+    if (reqId !== feedReqId) return;
+    document.getElementById('feed').innerHTML = '<div class="empty-state"><div class="big">' + ICON.alert + '</div>' + esc(e.message) + '</div>';
+    document.getElementById('load-more').style.display = 'none';
+    return;
+  }
+  if (reqId !== feedReqId) return; // 已有更新的请求（如快速切换频道/排序），丢弃过期响应，避免覆盖新内容
+  const feed = document.getElementById('feed');
+  // 推荐频道提示「智能推荐」, 其余频道清空
+  const cap = document.getElementById('feed-caption');
+  if (cap) cap.textContent = (curTab !== 'follow' && curCat === '推荐') ? '✨ 根据你的兴趣标签智能推荐' : '';
+  if (reset) {
+    renderFeed(feed, data.items, curTab === 'follow' ? '还没有关注任何人的内容，去用户主页点「+ 关注」订阅吧' : undefined);
+  } else {
+    appendFeed(feed, data.items); // 新卡片落入最短列
+  }
+  document.getElementById('load-more').style.display = data.hasMore ? '' : 'none';
+}
+
+function renderChannels() {
+  const bar = document.getElementById('channel-bar');
+  bar.innerHTML = CHANNELS.map(c => {
+    const active = (c === '关注' && curTab === 'follow') || (c !== '关注' && curTab !== 'follow' && curCat === c);
+    return '<button class="chip' + (active ? ' active' : '') + '" data-c="' + c + '">' + c + '</button>';
+  }).join('') +
+    '<div style="margin-left:auto; display:flex; gap:4px; flex-shrink:0;">' +
+    '<button class="chip' + (curSort === 'hot' ? ' active' : '') + '" data-sort="hot">综合</button>' +
+    '<button class="chip' + (curSort === 'new' ? ' active' : '') + '" data-sort="new">最新</button>' +
+    '</div>';
+  bar.querySelectorAll('.chip[data-c]').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const c = chip.dataset.c;
+      if (c === '关注') { curTab = 'follow'; curCat = '推荐'; }
+      else { curTab = ''; curCat = c; }
+      renderChannels();
+      loadFeed(true);
+    });
+  });
+  bar.querySelectorAll('.chip[data-sort]').forEach(chip => {
+    chip.addEventListener('click', () => {
+      curSort = chip.dataset.sort;
+      renderChannels();
+      loadFeed(true);
+    });
+  });
+}
+
+document.getElementById('load-more').addEventListener('click', async function () {
+  if (this.disabled) return;
+  this.disabled = true; this.textContent = '加载中…';
+  curPage++;
+  try {
+    await loadFeed(false);
+  } catch (e) {
+    curPage--; // 失败回退页码，按钮可重试
+    toast(e.message, true);
+  }
+  this.disabled = false; this.textContent = '加载更多';
+});
+
+(async function init() {
+  try {
+    await renderTopNav();
+  } catch (e) {
+    location.href = '/login';
+    return;
+  }
+  renderChannels();
+  loadFeed(true);
+})();
+</script>
+</body>
+</html>

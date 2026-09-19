@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>私信 - 素见</title>
+<link rel="stylesheet" href="/css/colors_and_type.css">
+<link rel="stylesheet" href="/css/components.css">
+<link rel="stylesheet" href="/css/app.css">
+<style>
+.msg-layout { display: grid; grid-template-columns: 300px 1fr; gap: var(--space-4); min-height: 560px; max-width: 980px; margin: 0 auto; }
+.msg-list-panel { background: var(--color-bg-white); border-radius: var(--radius-lg); box-shadow: var(--shadow-2); overflow: hidden; display: flex; flex-direction: column; }
+.msg-list-head { padding: var(--space-4); font-weight: 600; font-size: var(--font-size-h4); border-bottom: 1px solid var(--color-border-2); }
+.msg-item { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); cursor: pointer; border-bottom: 1px solid var(--color-border-2); transition: background .12s; }
+.msg-item:hover { background: var(--color-bg-4); }
+.msg-item.active { background: var(--primary-1); }
+.msg-item .mi-body { flex: 1; min-width: 0; }
+.msg-item .mi-name { font-weight: 500; color: var(--color-text-1); display: flex; justify-content: space-between; }
+.msg-item .mi-preview { font-size: var(--font-size-body); color: var(--color-text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.msg-item .mi-unread { background: var(--danger-5); color: #fff; font-size: 11px; border-radius: 999px; padding: 1px 6px; }
+.chat-panel { background: var(--color-bg-white); border-radius: var(--radius-lg); box-shadow: var(--shadow-2); display: flex; flex-direction: column; overflow: hidden; }
+.chat-head { padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--color-border-2); display: flex; align-items: center; gap: var(--space-3); font-weight: 600; }
+.chat-body { flex: 1; padding: var(--space-4); overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-3); background: var(--color-bg-4); }
+.chat-empty { color: var(--color-text-3); text-align: center; margin: auto; font-size: var(--font-size-lead); }
+.bubble { max-width: 68%; padding: 9px 13px; border-radius: var(--radius-md); font-size: var(--font-size-lead); line-height: 20px; word-break: break-word; white-space: pre-wrap; }
+.bubble.me { align-self: flex-end; background: var(--primary-6); color: #fff; border-bottom-right-radius: 2px; }
+.bubble.other { align-self: flex-start; background: var(--color-bg-white); border: 1px solid var(--color-border-2); border-bottom-left-radius: 2px; }
+.bubble .bt { font-size: var(--font-size-body); opacity: .75; margin-top: 2px; }
+.bubble video { display: block; max-width: 280px; width: 100%; border-radius: 8px; background: #000; }
+.bubble img { display: block; max-width: 280px; max-height: 340px; border-radius: 8px; }
+.bubble .f-card { display: flex; align-items: center; gap: 10px; min-width: 200px; max-width: 260px; }
+.bubble .f-card .f-icon { width: 38px; height: 38px; border-radius: 8px; background: var(--color-bg-4); display: flex; align-items: center; justify-content: center; color: var(--color-text-3); flex-shrink: 0; }
+.bubble.me .f-card .f-icon { background: rgba(255,255,255,.2); }
+.bubble .f-card .f-info { flex: 1; min-width: 0; }
+.bubble .f-card .f-name { font-size: var(--font-size-lead); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bubble .f-card .f-meta { font-size: var(--font-size-body); opacity: .75; margin-top: 2px; }
+.bubble .f-card .f-dl { flex-shrink: 0; color: inherit; opacity: .9; text-decoration: none; }
+.bubble.me .f-card .f-dl { color: #fff; }
+.chat-input-bar { display: flex; gap: var(--space-3); padding: var(--space-3) var(--space-4); border-top: 1px solid var(--color-border-2); align-items: flex-end; }
+.chat-input-bar textarea { flex: 1; border: 1px solid var(--color-border-3); border-radius: var(--radius-md); padding: 9px 12px; font-size: var(--font-size-lead); resize: none; outline: none; min-height: 40px; max-height: 120px; font-family: inherit; }
+.chat-input-bar textarea:focus { border-color: var(--primary-6); }
+.chat-input-bar .btn-video { flex-shrink: 0; display: inline-flex; align-items: center; gap: 5px; }
+@media (max-width: 860px) {
+  .msg-layout { grid-template-columns: 1fr; }
+  .msg-list-panel { max-height: 240px; }
+}
+</style>
+</head>
+<body>
+<header id="topnav" class="app-topnav"></header>
+
+<div class="container">
+  <div class="msg-layout">
+    <div class="msg-list-panel">
+      <div class="msg-list-head">私信</div>
+      <div style="flex:1; overflow-y:auto;" id="conv-list"></div>
+    </div>
+    <div class="chat-panel">
+      <div class="chat-head" id="chat-head"></div>
+      <div class="chat-body" id="chat-body">
+        <div class="chat-empty" id="chat-empty">选择左侧会话开始聊天，或去他人主页「发私信」</div>
+      </div>
+      <div class="chat-input-bar" id="input-bar" style="display:none;">
+        <input type="file" id="msg-file-input" style="display:none">
+        <button class="btn btn-outline btn-md btn-video" id="msg-file-btn" onclick="document.getElementById('msg-file-input').click()" title="传输文件（图片/视频/其他，≤300MB）">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M9.5 3.5 6 7a2 2 0 0 0 2.8 2.8L12 6.6 12.7 6a4 4 0 0 0-5.7-5.7L3.5 3.8A4 4 0 0 0 9.2 9.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span class="btn-video-label">传输文件</span>
+        </button>
+        <textarea id="msg-input" placeholder="输入消息…" rows="1"></textarea>
+        <button class="btn btn-primary btn-md" id="msg-send-btn" onclick="sendMsg()">发送</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/js/app.js"></script>
+<script>
+'use strict';
+let me = null, peer = null, peerID = null, pollTimer = null, sending = false;
+
+function convTime(ts) {
+  const d = new Date(ts * 1000);
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  const p = n => (n < 10 ? '0' + n : '' + n);
+  if (sameDay) return p(d.getHours()) + ':' + p(d.getMinutes());
+  return d.getMonth() + 1 + '/' + d.getDate();
+}
+
+async function loadConvs() {
+  const list = await api('/api/messages');
+  const box = document.getElementById('conv-list');
+  if (!list || list.length === 0) {
+    box.innerHTML = '<div style="padding: var(--space-6); text-align:center; color:var(--color-text-3);">还没有会话<br>去别人主页点「发私信」吧</div>';
+    return;
+  }
+  box.innerHTML = list.map(c => {
+    const unread = c.unread > 0 ? '<span class="mi-unread">' + c.unread + '</span>' : '';
+    return '<div class="msg-item' + (peerID === c.peer.id ? ' active' : '') + '" data-id="' + c.peer.id + '" onclick="openChat(\'' + c.peer.id + '\')">' +
+      avatarHTML(c.peer.nickname, c.peer.avatar) +
+      '<div class="mi-body">' +
+      '<div class="mi-name"><span>' + esc(c.peer.nickname) + '</span><span style="font-size:var(--font-size-body); color:var(--color-text-3); font-weight:400;">' + convTime(c.lastMsg.createdAt) + '</span></div>' +
+      '<div class="mi-preview">' + msgPreview(c.lastMsg) + '</div>' +
+      '</div>' + unread + '</div>';
+  }).join('');
+  document.querySelectorAll('.msg-item').forEach(el => {
+    el.addEventListener('click', () => openChat(el.dataset.id));
+  });
+}
+
+async function openChat(uid, name) {
+  peerID = uid;
+  const d = await api('/api/messages/with/' + uid);
+  peer = d.peer;
+  document.getElementById('chat-head').innerHTML =
+    avatarHTML(peer.nickname, peer.avatar, 'default') +
+    '<div>' + esc(peer.nickname) + '</div>' +
+    '<a href="/profile?u=' + esc(peer.id) + '" style="margin-left:auto; font-size:var(--font-size-body); color:var(--primary-6); font-weight:400;">主页</a>';
+  document.getElementById('chat-empty').style.display = 'none';
+  document.getElementById('input-bar').style.display = 'flex';
+  renderMsgs(d.messages || []);
+  await loadConvs();
+  renderTopNav(); // 刷新顶栏私信未读红点
+  startPoll();
+}
+
+/* 文件大小格式化 */
+function fmtSize(n) {
+  if (n == null || n < 0) return '';
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1).replace(/\.0$/, '') + ' KB';
+  if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(1).replace(/\.0$/, '') + ' MB';
+  return (n / 1024 / 1024 / 1024).toFixed(2) + ' GB';
+}
+
+/* 会话列表摘要 */
+function msgPreview(m) {
+  const who = m.fromId === me.id ? '我：' : '';
+  if (m.mediaType === 'image') return who + '[图片]';
+  if (m.mediaType === 'video') return who + '[视频]';
+  if (m.mediaType === 'file') return who + '[文件] ' + (m.mediaName || '');
+  return who + m.content;
+}
+
+/* 气泡内容：文本 / 图片 / 视频 / 文件卡片 */
+function msgHTML(m) {
+  if (m.mediaType === 'image' && m.media) {
+    return '<img src="' + esc(m.media) + '" loading="lazy" onerror="this.onerror=null;this.src=\'\';this.style.display=\'none\';">';
+  }
+  if (m.mediaType === 'video' && m.media) {
+    return '<video controls preload="metadata" src="' + esc(m.media) + '"></video>';
+  }
+  if (m.mediaType === 'file' && m.media) {
+    const name = m.mediaName || '文件';
+    return '<div class="f-card">' +
+      '<div class="f-icon"><svg width="20" height="20" viewBox="0 0 16 16" fill="none"><path d="M9 1.5H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V5L9 1.5z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M9 1.5V5h3.5" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg></div>' +
+      '<div class="f-info"><div class="f-name">' + esc(name) + '</div><div class="f-meta">' + fmtSize(m.mediaSize) + '</div></div>' +
+      '<a class="f-dl" href="' + esc(m.media) + '" download="' + esc(name) + '" title="下载"><svg width="18" height="18" viewBox="0 0 16 16" fill="none"><path d="M8 2v8m0 0 3-3m-3 3L5 7m-2.5 5.5h11" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></a>' +
+      '</div>';
+  }
+  return esc(m.content);
+}
+
+function renderMsgs(msgs, forceScroll) {
+  const body = document.getElementById('chat-body');
+  if (!msgs || msgs.length === 0) {
+    body.innerHTML = '<div class="chat-empty">打个招呼吧～</div>';
+    return;
+  }
+  const nearBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 80;
+  body.innerHTML = msgs.map(m => {
+    const mine = m.fromId === me.id;
+    return '<div class="bubble ' + (mine ? 'me' : 'other') + '">' + msgHTML(m) +
+      '<div class="bt">' + (mine ? '我' : esc(m.fromName)) + ' · ' + fmtTime(m.createdAt) + '</div></div>';
+  }).join('');
+  // 仅当发送后强制滚底，或用户本就停在底部时跟随；上滑看历史时不打断
+  if (forceScroll || nearBottom) body.scrollTop = body.scrollHeight;
+}
+
+async function sendMsg() {
+  if (sending) return;            // 防重复发送（快速连点 / 连续回车）
+  const input = document.getElementById('msg-input');
+  const text = input.value.trim();
+  if (!text || !peerID) return;
+  sending = true;
+  try {
+    await api('/api/messages/send', { method: 'POST', body: { to: peerID, content: text } });
+    input.value = '';
+    const d = await api('/api/messages/with/' + peerID);
+    renderMsgs(d.messages || [], true);
+    loadConvs();
+  } catch (e) { toast(e.message, true); }
+  sending = false;
+}
+
+/* 发送任意文件（图片/视频/其他）：选择文件 → 类型检测 → 上传 → 作为文件消息发送 */
+const MSG_MAX_SIZE = 300 * 1024 * 1024; // 单次 ≤300MB
+function detectMediaType(f) {
+  const n = (f.name || '').toLowerCase();
+  if (/^image\//.test(f.type) || /\.(jpg|jpeg|png|gif|webp|bmp|svg|ico|tif|tiff|avif)$/.test(n)) return 'image';
+  if (/^video\//.test(f.type) || /\.(mp4|webm|mov|m4v|avi|mkv|flv|wmv|ts|3gp|ogv)$/.test(n)) return 'video';
+  return 'file';
+}
+document.getElementById('msg-file-input').addEventListener('change', async e => {
+  const f = e.target.files[0];
+  e.target.value = ''; // 允许连续选同一个文件
+  if (!f || !peerID) return;
+  if (f.size > MSG_MAX_SIZE) { toast('文件不能超过 300MB', true); return; }
+  if (sending) return;
+  sending = true;
+  const btn = document.getElementById('msg-file-btn');
+  const label = btn.querySelector('.btn-video-label');
+  const oldHtml = btn.innerHTML;
+  btn.disabled = true;
+  label.textContent = '上传中…';
+  try {
+    const fd = new FormData();
+    fd.append('file', f);
+    const r = await api('/api/upload/any', { method: 'POST', form: fd });
+    await api('/api/messages/send', { method: 'POST', body: {
+      to: peerID, mediaType: detectMediaType(f), media: r.path, mediaName: r.name || f.name, mediaSize: r.size || f.size
+    } });
+    const d = await api('/api/messages/with/' + peerID);
+    renderMsgs(d.messages || [], true);
+    loadConvs();
+  } catch (err) { toast(err.message, true); }
+  sending = false;
+  btn.disabled = false;
+  btn.innerHTML = oldHtml;
+});
+
+// 离开页面时停止轮询，避免资源浪费
+window.addEventListener('beforeunload', () => clearInterval(pollTimer));
+window.addEventListener('pagehide', () => clearInterval(pollTimer));
+// 页面切到后台时暂停轮询，回到前台恢复（省流量/省电）
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  } else if (peerID && !pollTimer) {
+    startPoll();
+  }
+});
+
+function startPoll() {
+  clearInterval(pollTimer);
+  pollTimer = setInterval(async () => {
+    if (!peerID) return;
+    try {
+      const d = await api('/api/messages/with/' + peerID);
+      renderMsgs(d.messages || []);
+      loadConvs();
+    } catch (e) { /* ignore */ }
+  }, 5000);
+}
+
+document.getElementById('msg-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsg(); }
+});
+
+(async function init() {
+  try { me = await renderTopNav(); } catch (e) { location.href = '/login'; return; }
+  await loadConvs();
+  // 支持 /messages?u=<userID> 直达会话
+  const u = getQuery('u');
+  if (u) openChat(u);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>草稿箱 - 素见</title>
+<link rel="stylesheet" href="/css/colors_and_type.css">
+<link rel="stylesheet" href="/css/components.css">
+<link rel="stylesheet" href="/css/app.css">
+<style>
+.dr-page { max-width: 720px; margin: 0 auto; }
+.dr-item { display: flex; align-items: center; gap: var(--space-4); background: var(--color-bg-white); border-radius: var(--radius-md); box-shadow: var(--shadow-1); padding: var(--space-4); margin-bottom: var(--space-3); }
+.dr-item .dr-cover { width: 72px; height: 72px; border-radius: var(--radius-sm); object-fit: cover; background: var(--color-bg-5); flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: var(--color-text-3); font-size: 22px; overflow: hidden; }
+.dr-item .dr-info { flex: 1; min-width: 0; }
+.dr-item .dr-info .title { font-weight: var(--font-weight-medium); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dr-item .dr-info .meta { font-size: var(--font-size-body); color: var(--color-text-3); margin-top: 2px; }
+</style>
+</head>
+<body>
+<header id="topnav" class="app-topnav"></header>
+
+<div class="container">
+  <div class="dr-page">
+    <div class="nt-head" style="display:flex; align-items:center; justify-content:space-between; margin: var(--space-4) 0 var(--space-5);">
+      <h2 style="font-size: var(--font-size-h2);">草稿箱</h2>
+      <a class="btn btn-primary btn-sm" href="/publish">+ 新建笔记</a>
+    </div>
+    <div id="dr-list"></div>
+  </div>
+</div>
+
+<script src="/js/app.js"></script>
+<script>
+'use strict';
+async function render() {
+  const drafts = await api('/api/drafts');
+  const box = document.getElementById('dr-list');
+  if (!drafts || drafts.length === 0) {
+    box.innerHTML = '<div class="empty-state"><div class="big">' + ICON.edit + '</div>还没有草稿</div>';
+    return;
+  }
+  box.innerHTML = drafts.map(d => {
+    const cover = d.media && d.media[0];
+    return '<div class="dr-item">' +
+      '<div class="dr-cover">' + (cover ? '<img src="' + esc(cover) + '" style="width:100%;height:100%;object-fit:cover;">' : (d.mediaType === 'video' ? ICON.video : ICON.image)) + '</div>' +
+      '<div class="dr-info">' +
+      '<div class="title">' + esc(d.title || '无标题') + '</div>' +
+      '<div class="meta">' + (d.mediaType === 'video' ? '视频' : '图文') + ' · ' + esc(d.category || '未分类') + ' · ' + fmtTime(d.updatedAt) + ' 更新</div>' +
+      '</div>' +
+      '<button class="btn btn-outline btn-sm" onclick="location.href=\'/publish?draft=' + esc(d.id) + '\'">继续编辑</button>' +
+      '<button class="btn btn-text btn-sm" style="color:var(--color-danger)" onclick="del(\'' + d.id + '\')">删除</button>' +
+      '</div>';
+  }).join('');
+}
+
+window.del = async id => {
+  if (!await confirmDialog('删除草稿', '确定删除这份草稿吗？', '删除')) return;
+  try {
+    await api('/api/drafts/' + id, { method: 'DELETE' });
+    toast('草稿已删除');
+    render();
+  } catch (e) { toast(e.message, true); }
+};
+
+(async function init() {
+  try { await renderTopNav(); } catch (e) { location.href = '/login'; return; }
+  render();
+})();
+</script>
+</body>
+</html>
