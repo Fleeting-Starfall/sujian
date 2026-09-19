@@ -504,7 +504,7 @@ CONC=500 node scripts/bench.js
 `./start.sh --port 9000`（或 `PORT=9000 ./start.sh`，或直接 `./sujian-server --port 9000`）。改端口后其他用户用对应端口访问即可。
 
 **Q9.1：能不能把整个项目文件夹移到别的位置？**
-可以。所有路径（data/、uploads/、public/）都以**二进制所在目录**为基准解析，无论把文件夹从 `/Users/m/Desktop/sujian` 移到 `~/myapp/` 还是 `/tmp/test/` 都直接 `./sujian-server` 即可。
+可以。所有路径（data/、uploads/、public/）都以**二进制所在目录**为基准解析，无论把文件夹从 `~/sujian` 移到 `~/myapp/` 还是 `/tmp/test/` 都直接 `./sujian-server` 即可。
 
 **Q10：数据安全吗？**
 数据落盘在 `data/*.json`，每次写操作原子保存、退出兜底；密码用 salt+SHA256 存储。局域网应用强度足够。建议定期备份 `data/` 和 `uploads/` 文件夹。

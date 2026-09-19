@@ -2253,7 +2253,7 @@ func (s *Store) RecommendForUser(userID string, limit int) []*model.Note {
 			}
 		}
 		ces := s.cesScoreLocked(n)
-		cesNorm := ces / (ces + 5) // 0~1 饱和, 避免高互动笔记碾压
+		cesNorm := ces / (ces + 5) // 0~1 饱和, 避免高互动笔记压制其他内容
 		rec := recencyScore(n.CreatedAt)
 		followBonus := 0.0
 		if followed[n.AuthorID] {

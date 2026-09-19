@@ -1,3 +1,5 @@
+[**English**](README.en.md) | **中文**
+
 # 素见 (Sujian)
 
 局域网内可访问的「小红书」风格内容社区。支持图文笔记与视频笔记、发布/点赞/收藏/评论/关注/搜索，  
@@ -184,7 +186,7 @@ sujian/                      # 项目根目录（即本文件夹，无嵌套子�
 - **单元/并发测试**：`go test ./...`（纯进程内 `httptest`，驱动真实 handler + 真实 store，不依赖网络）；`go test -race ./...` 额外验证并发安全。关键用例：`TestFunctionalFlows`（注册待审→管理员通过→发笔记→审核→评论点赞→私信无密码泄露→举报→被禁内容自动下架）、`TestConcurrentHandlerLoad`（高并发读写下 `-race` 无竞态）、store 层 `TestConcurrentAccess`、`image_opt_test.go`（图片优化 + 上传安全：`TestUploadOptimizesImage` 上传大图自动压缩、`TestUploadRejectsOversizeImage` 超大伪图片被拒、`TestUploadRejectsDisguisedFile` 伪装成图片的 HTML 被拒）。所有测试 ALL PASS，gofmt/go vet 干净。
 - **数据可靠性**：浏览量采用节流落盘（累计 20 次变更或 30 秒落盘一次），收到 `SIGINT/SIGTERM`（Ctrl+C / `./start.sh stop`）时自动全量落盘后退出，不丢数据。
 - **下架笔记生命周期**：下架（软删除）后保留 30 天宽限期，期间可在管理后台恢复或永久删除；超期可由管理员在管理后台一键清理（`清理旧下架` 按钮，默认 30 天，可自定义天数）。永久删除会一并清理 likes/favs/comments/通知与媒体文件，不可恢复。
-- **瀑布流**：首页/搜索/标签/主页采用 **JS 真瀑布流**（`public/js/masonry.js`，方案见 [`docs/masonry-plan.md`](docs/masonry-plan.md)，已实现）：卡片按时间倒序落入当前**最短列**，图片 `onload`/`error` 与窗口 `resize` 触发自动重排，响应式 **4/2/1 列**（≥900px / 480~900px / <480px），加载更多也自动找最短列，彻底解决原 CSS 多列布局的空隙、落点不可控、删除留窟窿等问题；零第三方依赖。
+- **瀑布流**：首页/搜索/标签/主页采用 **JS 真瀑布流**（`public/js/masonry.js`，方案见 [`docs/masonry-plan.md`](docs/masonry-plan.md)，已实现）：卡片按时间倒序落入当前**最短列**，图片 `onload`/`error` 与窗口 `resize` 触发自动重排，响应式 **4/2/1 列**（≥900px / 480~900px / <480px），加载更多也自动找最短列，解决了原 CSS 多列布局的空隙、落点不可控、删除留窟窿等问题；零第三方依赖。
 - **存储优化**：图片上传自动压缩（见「上传限制」）；**视频上传自动转码压缩**（有 ffmpeg 时，720p H.264/AAC，实测省 80%+）；`data/*.json` 以**紧凑 JSON**（无缩进）落盘，比格式化写法省约 16~30% 体积，且保持原子写（临时文件 + rename）；**按需落盘**——写操作只序列化保存发生变更的数据文件（点赞只写 likes.json），避免每次小操作全量重写 13 个文件，数据量增大时写入仍保持低延迟（进程退出时全量兜底保存，不丢数据）。
 - **性能参考**（实测：1000 篇笔记、10 核 Mac、500 并发）：读接口单请求 0.6~1.5ms；信息流 ~6.6k QPS、笔记详情 ~10k QPS、搜索 ~10k QPS、静态页 ~37.5k QPS、发评论 ~17.9k QPS；模拟 500 台设备同时打开应用（1500 请求）0.2s 完成、零失败；500 并发时内存峰值 ~120MB（常驻 20~30MB）。自带压测脚本：`scripts/bench.js`（`CONC=500 node scripts/bench.js`，写路径需 `NOTE_ID=n_xxx`）。
 
